@@ -1,0 +1,24 @@
+{
+  "name": "@circlesac/tsk",
+  "description": "Circles Tasks — unified task management CLI",
+  "type": "module",
+  "bin": { "tsk": "bin/tsk" },
+  "files": ["bin"],
+  "scripts": {
+    "build": "bun build --compile --outfile=dist/tsk src/index.ts",
+    "dev": "bun run src/index.ts",
+    "postinstall": "node bin/install.js"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/circlesac/tsk-cli"
+  },
+  "dependencies": {
+    "citty": "^0.1.6",
+    "marklassian": "^1.2.0"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.11"
+  }
+}
