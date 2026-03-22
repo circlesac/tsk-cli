@@ -175,7 +175,7 @@ function injectMentions(adf: any, mentions: { token: string; accountId: string; 
             replacement.push({ type: "mention", attrs: { id: m.accountId, text: `@${m.displayName}`, accessLevel: "" } });
             if (after) replacement.push({ type: "text", text: after, ...(node.marks ? { marks: node.marks } : {}) });
             nodes.splice(i, 1, ...replacement);
-            i += replacement.length - 1;
+            i += replacement.length - 2;
             break;
           }
         }
