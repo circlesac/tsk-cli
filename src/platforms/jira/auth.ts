@@ -23,9 +23,13 @@ export interface JiraAuth {
 }
 
 function getAcliConfig(): AcliConfig {
-  const configPath = join(homedir(), ".config", "acli", "global_auth_config.yaml");
+  const configPath = join(homedir(), ".config", "acli", "jira_config.yaml");
   const content = readFileSync(configPath, "utf-8");
 
+  // Parse current_profile to find the active profile's cloud_id and account_id
+  const currentProfile = content.match(/current_profile:\s*(.+)/)?.[1]?.trim();
+
+  // Extract fields from the active profile block within the profiles array
   const site = content.match(/site:\s*(.+)/)?.[1]?.trim();
   const cloudId = content.match(/cloud_id:\s*(.+)/)?.[1]?.trim();
   const email = content.match(/email:\s*(.+)/)?.[1]?.trim();
