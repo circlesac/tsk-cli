@@ -1,7 +1,7 @@
 import { defineCommand } from "citty";
 import { markdownToAdf } from "marklassian";
 import { getJiraAuth } from "../auth.js";
-import { authHeaders, findUserByEmail } from "../api.js";
+import { authHeaders, findUserByEmail, findUserByAccountId } from "../api.js";
 
 const addCommand = defineCommand({
   meta: { name: "add", description: "Add a comment (supports markdown, @email mentions)" },
@@ -133,15 +133,28 @@ export const commentCommand = defineCommand({
 // --- helpers ---
 
 async function buildAdf(auth: any, markdown: string) {
-  // Resolve @email mentions before markdown conversion
-  // Replace @email with placeholder to prevent marklassian from splitting into mailto links
-  const mentionPattern = /@([\w.+-]+@[\w.-]+\.\w+)/g;
-  const matches = [...markdown.matchAll(mentionPattern)];
+  // Resolve mentions before markdown conversion
+  // Supports two formats:
+  //   @user@example.com         — email-based (resolved via Jira user search)
+  //   @712020:uuid-here         — accountId-based (resolved via Jira user API)
+  const emailPattern = /@([\w.+-]+@[\w.-]+\.\w+)/g;
+  const accountIdPattern = /@(\d+:[0-9a-f-]{36})/g;
 
   const mentions: { token: string; accountId: string; displayName: string }[] = [];
   let processed = markdown;
 
-  for (const match of matches) {
+  // Resolve accountId mentions first (no ambiguity with email pattern)
+  for (const match of [...processed.matchAll(accountIdPattern)]) {
+    const user = await findUserByAccountId(auth, match[1]);
+    if (user) {
+      const token = `TSKMENTION${mentions.length}END`;
+      processed = processed.replace(match[0], token);
+      mentions.push({ token, accountId: user.accountId, displayName: user.displayName });
+    }
+  }
+
+  // Then resolve email mentions
+  for (const match of [...processed.matchAll(emailPattern)]) {
     const user = await findUserByEmail(auth, match[1]);
     if (user) {
       const token = `TSKMENTION${mentions.length}END`;

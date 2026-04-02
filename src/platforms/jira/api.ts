@@ -52,3 +52,13 @@ export async function findUserByEmail(auth: JiraAuth, email: string): Promise<{ 
   }
   return null;
 }
+
+export async function findUserByAccountId(auth: JiraAuth, accountId: string): Promise<{ accountId: string; displayName: string } | null> {
+  const url = `https://${auth.site}/rest/api/3/user?accountId=${encodeURIComponent(accountId)}`;
+  const res = await fetch(url, { headers: authHeaders(auth) });
+
+  if (!res.ok) return null;
+
+  const user = await res.json();
+  return { accountId: user.accountId, displayName: user.displayName };
+}
