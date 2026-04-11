@@ -62,6 +62,10 @@ jobs:
       - name: Build binary
         run: |
           bun build --compile --target=${{ matrix.target }} --outfile=tsk src/index.ts
+          if [[ "${{ matrix.target }}" == bun-darwin-* ]]; then
+            codesign --remove-signature tsk
+            codesign --force --deep -s - tsk
+          fi
           tar czf ${{ matrix.name }}.tar.gz tsk
 
       - uses: actions/upload-artifact@v4
