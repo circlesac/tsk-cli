@@ -7,6 +7,7 @@
   "scripts": {
     "build": "bun build --compile --outfile=dist/tsk src/index.ts",
     "dev": "bun run src/index.ts",
+    "test": "vitest run",
     "postinstall": "node bin/install.js"
   },
   "license": "MIT",
@@ -19,6 +20,8 @@
     "marklassian": "^1.2.0"
   },
   "devDependencies": {
-    "bun-types": "^1.3.11"
+    "@vitest/coverage-v8": "^4.0.18",
+    "bun-types": "^1.3.11",
+    "vitest": "^4.0.18"
   }
 }

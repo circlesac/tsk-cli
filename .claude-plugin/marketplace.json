@@ -1,0 +1,11 @@
+{
+  "name": "tsk",
+  "owner": { "name": "Circles Inc." },
+  "plugins": [
+    {
+      "name": "tsk",
+      "source": "./",
+      "description": "Unified task management CLI reference for Claude Code — Jira issue, comment, and attachment operations via tsk"
+    }
+  ]
+}
