@@ -3,3 +3,4 @@ dist/
 bin/native/
 coverage/
 *.tgz
+*.bun-build
