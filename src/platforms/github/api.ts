@@ -94,6 +94,35 @@ async function memexCall(
 }
 
 /**
+ * Resolve whether a login is an organization or a user. Cached per process.
+ * GraphQL has separate roots — `organization(login:X)` vs `user(login:X)`.
+ */
+const ownerKindCache = new Map<string, "organization" | "user">();
+
+export function getOwnerKind(login: string): "organization" | "user" {
+  const cached = ownerKindCache.get(login);
+  if (cached) return cached;
+  // Probe via gh api — fast and works with PAT
+  try {
+    const out = execSync(`gh api users/${login} --jq '.type'`, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+    const kind = out.trim() === "Organization" ? "organization" : "user";
+    ownerKindCache.set(login, kind);
+    return kind;
+  } catch {
+    throw new Error(`Could not resolve owner '${login}' — does it exist?`);
+  }
+}
+
+/**
+ * Inline GraphQL root with a stable alias `owner` so response handlers don't care
+ * about org vs user. Use in queries as: `query { ${ownerRoot(login)} { projectV2(...) { ... } } }`
+ * and read response at `data.owner.projectV2.*`.
+ */
+export function ownerRoot(login: string): string {
+  return `owner: ${getOwnerKind(login)}(login:"${login}")`;
+}
+
+/**
  * Use `gh api graphql` for reads — the public GraphQL works with PAT auth,
  * and gh2/tsk doesn't need to reimplement what `gh` already provides.
  */
@@ -125,11 +154,11 @@ async function resolveProject(
   org: string,
   projectNumber: number,
 ): Promise<{ projectId: number; page: PageState }> {
-  type Resp = { organization?: { projectV2?: { fullDatabaseId: number } } };
+  type Resp = { owner?: { projectV2?: { fullDatabaseId: number } } };
   const data = ghGraphQL<Resp>(
-    `query { organization(login:"${org}") { projectV2(number:${projectNumber}) { fullDatabaseId } } }`,
+    `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { fullDatabaseId } } }`,
   );
-  const id = data.organization?.projectV2?.fullDatabaseId;
+  const id = data.owner?.projectV2?.fullDatabaseId;
   if (!id) {
     throw new Error(`Project ${org}/projects/${projectNumber} not found or inaccessible`);
   }
@@ -173,11 +202,11 @@ export function getViewStateFull(
     verticalGroupByFields?: { nodes?: Array<{ databaseId: number }> };
     fields?: { nodes?: Array<{ databaseId: number }> };
   };
-  type Resp = { organization?: { projectV2?: { views?: { nodes?: Node[] } } } };
+  type Resp = { owner?: { projectV2?: { views?: { nodes?: Node[] } } } };
   const data = ghGraphQL<Resp>(
-    `query { organization(login:"${org}") { projectV2(number:${projectNumber}) { views(first:50) { nodes { number name layout filter groupByFields(first:10) { nodes { ... on ProjectV2FieldCommon { databaseId } } } sortByFields(first:10) { nodes { direction field { ... on ProjectV2FieldCommon { databaseId } } } } verticalGroupByFields(first:10) { nodes { ... on ProjectV2FieldCommon { databaseId } } } fields(first:50) { nodes { ... on ProjectV2FieldCommon { databaseId } } } } } } } }`,
+    `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { views(first:50) { nodes { number name layout filter groupByFields(first:10) { nodes { ... on ProjectV2FieldCommon { databaseId } } } sortByFields(first:10) { nodes { direction field { ... on ProjectV2FieldCommon { databaseId } } } } verticalGroupByFields(first:10) { nodes { ... on ProjectV2FieldCommon { databaseId } } } fields(first:50) { nodes { ... on ProjectV2FieldCommon { databaseId } } } } } } } }`,
   );
-  const views = data.organization?.projectV2?.views?.nodes ?? [];
+  const views = data.owner?.projectV2?.views?.nodes ?? [];
   const found = views.find((v) => v.number === viewNumber);
   if (!found) {
     throw new Error(`View #${viewNumber} not found in ${org}/projects/${projectNumber}`);
@@ -252,6 +281,7 @@ export interface IssueType {
 }
 
 export function getOrgId(org: string): string {
+  // Issue types are org-only — explicitly use organization root.
   type Resp = { organization?: { id: string } };
   const data = ghGraphQL<Resp>(`query { organization(login:"${org}") { id } }`);
   if (!data.organization?.id) throw new Error(`Organization '${org}' not found`);
@@ -414,8 +444,7 @@ export interface ProjectField {
 
 export function listProjectFields(org: string, projectNumber: number): ProjectField[] {
   type Resp = {
-    organization?: {
-      projectV2?: {
+    owner?: { projectV2?: {
         fields?: {
           nodes?: Array<
             | { id: string; name: string; dataType: string }
@@ -426,9 +455,9 @@ export function listProjectFields(org: string, projectNumber: number): ProjectFi
     };
   };
   const data = ghGraphQL<Resp>(
-    `query { organization(login:"${org}") { projectV2(number:${projectNumber}) { fields(first:50) { nodes { ... on ProjectV2FieldCommon { id name dataType } ... on ProjectV2SingleSelectField { id name dataType options { id name color description } } } } } } }`,
+    `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { fields(first:50) { nodes { ... on ProjectV2FieldCommon { id name dataType } ... on ProjectV2SingleSelectField { id name dataType options { id name color description } } } } } } }`,
   );
-  return (data.organization?.projectV2?.fields?.nodes ?? []) as ProjectField[];
+  return (data.owner?.projectV2?.fields?.nodes ?? []) as ProjectField[];
 }
 
 export function findProjectField(org: string, projectNumber: number, name: string): ProjectField {
@@ -553,8 +582,7 @@ export interface ProjectItem {
 
 export function listProjectItems(org: string, projectNumber: number): ProjectItem[] {
   type Resp = {
-    organization?: {
-      projectV2?: {
+    owner?: { projectV2?: {
         items?: {
           nodes?: Array<{
             id: string;
@@ -575,9 +603,9 @@ export function listProjectItems(org: string, projectNumber: number): ProjectIte
     };
   };
   const data = ghGraphQL<Resp>(
-    `query { organization(login:"${org}") { projectV2(number:${projectNumber}) { items(first:100) { nodes { id content { ... on Issue { number title } ... on PullRequest { number title } ... on DraftIssue { title } } fieldValues(first:30) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { __typename name field { ... on ProjectV2SingleSelectField { name } } } ... on ProjectV2ItemFieldTextValue { __typename text field { ... on ProjectV2Field { name } } } ... on ProjectV2ItemFieldNumberValue { __typename number field { ... on ProjectV2Field { name } } } ... on ProjectV2ItemFieldDateValue { __typename date field { ... on ProjectV2Field { name } } } } } } } } } }`,
+    `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { items(first:100) { nodes { id content { ... on Issue { number title } ... on PullRequest { number title } ... on DraftIssue { title } } fieldValues(first:30) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { __typename name field { ... on ProjectV2SingleSelectField { name } } } ... on ProjectV2ItemFieldTextValue { __typename text field { ... on ProjectV2Field { name } } } ... on ProjectV2ItemFieldNumberValue { __typename number field { ... on ProjectV2Field { name } } } ... on ProjectV2ItemFieldDateValue { __typename date field { ... on ProjectV2Field { name } } } } } } } } } }`,
   );
-  const items = data.organization?.projectV2?.items?.nodes ?? [];
+  const items = data.owner?.projectV2?.items?.nodes ?? [];
   return items.map((i) => {
     const fields: Record<string, string> = {};
     for (const fv of i.fieldValues.nodes ?? []) {
@@ -596,14 +624,14 @@ export function listProjectItems(org: string, projectNumber: number): ProjectIte
 }
 
 export function getProjectId(org: string, projectNumber: number): string {
-  type Resp = { organization?: { projectV2?: { id: string } } };
+  type Resp = { owner?: { projectV2?: { id: string } } };
   const data = ghGraphQL<Resp>(
-    `query { organization(login:"${org}") { projectV2(number:${projectNumber}) { id } } }`,
+    `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { id } } }`,
   );
-  if (!data.organization?.projectV2?.id) {
+  if (!data.owner?.projectV2?.id) {
     throw new Error(`Project ${org}/projects/${projectNumber} not found`);
   }
-  return data.organization.projectV2.id;
+  return data.owner?.projectV2.id;
 }
 
 /**
@@ -825,17 +853,16 @@ export function bulkUnarchive(
   const projectNodeId = getProjectId(org, projectNumber);
   // For unarchive we need to fetch archived items separately
   type Resp = {
-    organization?: {
-      projectV2?: {
+    owner?: { projectV2?: {
         items?: { nodes?: Array<{ id: string; content: { number?: number; title?: string } | null }> };
       };
     };
   };
   // archived: filterBy doesn't exist as input — we just list all items including archived
   const data = ghGraphQL<Resp>(
-    `query { organization(login:"${org}") { projectV2(number:${projectNumber}) { items(first:100) { nodes { id isArchived content { ... on Issue { number title } ... on PullRequest { number title } ... on DraftIssue { title } } } } } } }`.replace("nodes { id isArchived", "nodes { id isArchived"),
+    `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { items(first:100) { nodes { id isArchived content { ... on Issue { number title } ... on PullRequest { number title } ... on DraftIssue { title } } } } } } }`.replace("nodes { id isArchived", "nodes { id isArchived"),
   );
-  const all = (data.organization?.projectV2?.items?.nodes ?? []) as Array<{ id: string; isArchived?: boolean; content: { number?: number; title?: string } | null }>;
+  const all = (data.owner?.projectV2?.items?.nodes ?? []) as Array<{ id: string; isArchived?: boolean; content: { number?: number; title?: string } | null }>;
   // For unarchive, we just operate on all archived items (no field-based where since archived items don't appear in the standard listProjectItems)
   const candidates = all.filter((i) => i.isArchived);
   let applied = 0;
@@ -933,16 +960,15 @@ export interface StatusUpdate {
 
 export function listStatusUpdates(org: string, projectNumber: number): StatusUpdate[] {
   type Resp = {
-    organization?: {
-      projectV2?: {
+    owner?: { projectV2?: {
         statusUpdates?: { nodes?: StatusUpdate[] };
       };
     };
   };
   const data = ghGraphQL<Resp>(
-    `query { organization(login:"${org}") { projectV2(number:${projectNumber}) { statusUpdates(first:50) { nodes { id fullDatabaseId body status startDate targetDate createdAt } } } } }`,
+    `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { statusUpdates(first:50) { nodes { id fullDatabaseId body status startDate targetDate createdAt } } } } }`,
   );
-  return data.organization?.projectV2?.statusUpdates?.nodes ?? [];
+  return data.owner?.projectV2?.statusUpdates?.nodes ?? [];
 }
 
 export function createStatusUpdate(
