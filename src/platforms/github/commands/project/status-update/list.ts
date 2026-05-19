@@ -9,7 +9,7 @@ export const statusUpdateListCommand = defineCommand({
     json: { type: "boolean", description: "Output as JSON", default: false },
   },
   async run({ args }) {
-    const updates = listStatusUpdates(String(args.org), Number(args.project));
+    const updates = await listStatusUpdates(String(args.org), Number(args.project));
     if (args.json) {
       console.log(JSON.stringify(updates, null, 2));
       return;

@@ -19,7 +19,7 @@ export const issueTypeCreateCommand = defineCommand({
       console.error(`Invalid color: ${args.color}. Use one of: ${COLORS.join(", ")}`);
       process.exit(1);
     }
-    const t = createIssueType(String(args.org), {
+    const t = await createIssueType(String(args.org), {
       name: String(args.name),
       color: color as Color,
       description: String(args.description),

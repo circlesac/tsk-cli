@@ -20,7 +20,7 @@ export const optionAddCommand = defineCommand({
       console.error(`Invalid color: ${args.color}. Use: ${COLORS.join(", ")}`);
       process.exit(1);
     }
-    addFieldOption(
+    await addFieldOption(
       String(args.org),
       Number(args.project),
       String(args.field),

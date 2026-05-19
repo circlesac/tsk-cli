@@ -17,7 +17,7 @@ export const statusUpdateUpdateCommand = defineCommand({
   },
   async run({ args }) {
     // Look up the GraphQL node ID via list (matches by fullDatabaseId)
-    const updates = listStatusUpdates(String(args.org), Number(args.project));
+    const updates = await listStatusUpdates(String(args.org), Number(args.project));
     const wanted = Number(args.id);
     const target = updates.find((u) => Number(u.fullDatabaseId) === wanted);
     if (!target) {
@@ -38,7 +38,7 @@ export const statusUpdateUpdateCommand = defineCommand({
     if (args["start-date"] !== undefined) changes.startDate = String(args["start-date"]);
     if (args["target-date"] !== undefined) changes.targetDate = String(args["target-date"]);
 
-    const u = updateStatusUpdate(target.id, changes);
+    const u = await updateStatusUpdate(target.id, changes);
     console.log(`✓ Updated status update #${u.fullDatabaseId}`);
   },
 });

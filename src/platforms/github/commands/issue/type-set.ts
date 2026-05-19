@@ -28,7 +28,7 @@ export const typeSetCommand = defineCommand({
     const typeName = String(args.type);
 
     if (!args.bulk && number !== undefined) {
-      setIssueType(org, owner, repo, number, typeName);
+      await setIssueType(org, owner, repo, number, typeName);
       console.log(`✓ Set ${owner}/${repo}#${number} → Issue Type '${typeName}'`);
       return;
     }
@@ -43,7 +43,7 @@ export const typeSetCommand = defineCommand({
     if (args.milestone) filter.milestone = parseInt(String(args.milestone), 10);
     if (args.label) filter.label = String(args.label);
 
-    const result = bulkSetIssueType(org, owner, repo, typeName, filter);
+    const result = await bulkSetIssueType(org, owner, repo, typeName, filter);
     console.log(
       `✓ Bulk set ${owner}/${repo} → Issue Type '${typeName}': applied=${result.applied} skipped=${result.skipped} total=${result.total}`,
     );

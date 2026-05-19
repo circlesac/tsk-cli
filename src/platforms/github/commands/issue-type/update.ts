@@ -30,7 +30,7 @@ export const issueTypeUpdateCommand = defineCommand({
     if (args.enabled) changes.isEnabled = true;
     if (args.disabled) changes.isEnabled = false;
 
-    const t = updateIssueType(String(args.org), String(args.name), changes);
+    const t = await updateIssueType(String(args.org), String(args.name), changes);
     console.log(`✓ Updated Issue Type '${t.name}' (${t.color}, enabled=${t.isEnabled})`);
   },
 });

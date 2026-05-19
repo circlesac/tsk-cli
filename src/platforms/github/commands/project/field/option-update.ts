@@ -30,7 +30,7 @@ export const optionUpdateCommand = defineCommand({
       changes.color = c as Color;
     }
     if (args.description !== undefined) changes.description = String(args.description);
-    updateFieldOption(
+    await updateFieldOption(
       String(args.org),
       Number(args.project),
       String(args.field),

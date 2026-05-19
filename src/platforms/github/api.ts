@@ -1,7 +1,30 @@
 import { execSync } from "node:child_process";
+import { loadCookies } from "./credentials.js";
 import type { GitHubCookies, ViewConfig, FullView } from "./types.js";
 
 const GITHUB = "https://github.com";
+const GH_API = "https://api.github.com";
+
+let cachedToken: string | undefined | null = null;
+
+async function getApiToken(): Promise<string> {
+  if (cachedToken !== null) {
+    if (!cachedToken) {
+      throw new Error(
+        "No GitHub API token stored. Run `tsk github auth login` (after `gh auth login` or with --gh-token PAT).",
+      );
+    }
+    return cachedToken;
+  }
+  const creds = await loadCookies();
+  cachedToken = creds?.ghToken ?? undefined;
+  if (!cachedToken) {
+    throw new Error(
+      "No GitHub API token stored. Run `tsk github auth login` (after `gh auth login` or with --gh-token PAT).",
+    );
+  }
+  return cachedToken;
+}
 
 function buildCookieHeader(creds: GitHubCookies, freshGhSess?: string): string {
   const sess = freshGhSess ?? creds.ghSess;
@@ -123,25 +146,32 @@ export function ownerRoot(login: string): string {
 }
 
 /**
- * Use `gh api graphql` for reads — the public GraphQL works with PAT auth,
- * and gh2/tsk doesn't need to reimplement what `gh` already provides.
+ * Direct fetch to api.github.com/graphql with Bearer auth.
+ * Token captured by `tsk github auth login` (one-time, stored in credentials).
  */
-function ghGraphQL<T>(query: string): T {
-  let out: string;
-  try {
-    out = execSync(`gh api graphql -f query=${JSON.stringify(query)}`, {
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (err) {
-    const e = err as { stderr?: Buffer; message?: string };
-    const stderr = e.stderr?.toString() ?? "";
-    if (/not.*logged.*in|no.*authentication/i.test(stderr)) {
-      throw new Error('Read operations need `gh` CLI auth (PAT). Run `gh auth login` first.');
-    }
-    throw new Error(`gh api graphql failed: ${stderr || e.message}`);
+async function ghGraphQL<T>(query: string): Promise<T> {
+  const token = await getApiToken();
+  const resp = await fetch(`${GH_API}/graphql`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": "tsk-cli",
+    },
+    body: JSON.stringify({ query }),
+  });
+
+  if (resp.status === 401) {
+    throw new Error(
+      "GitHub API rejected token (401). Token may be expired/revoked. Re-run `tsk github auth login`.",
+    );
   }
-  const parsed = JSON.parse(out) as { data?: T; errors?: Array<{ message: string }> };
+  if (resp.status !== 200) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`GitHub GraphQL failed (HTTP ${resp.status}): ${text.slice(0, 200)}`);
+  }
+  const parsed = (await resp.json()) as { data?: T; errors?: Array<{ message: string }> };
   if (parsed.errors?.length) {
     throw new Error(`GraphQL errors: ${parsed.errors.map((e) => e.message).join("; ")}`);
   }
@@ -155,7 +185,7 @@ async function resolveProject(
   projectNumber: number,
 ): Promise<{ projectId: number; page: PageState }> {
   type Resp = { owner?: { projectV2?: { fullDatabaseId: number } } };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { fullDatabaseId } } }`,
   );
   const id = data.owner?.projectV2?.fullDatabaseId;
@@ -187,11 +217,11 @@ export interface ViewStateFull {
   visibleFields: number[];
 }
 
-export function getViewStateFull(
+export async function getViewStateFull(
   org: string,
   projectNumber: number,
   viewNumber: number,
-): ViewStateFull {
+): Promise<ViewStateFull> {
   type Node = {
     number: number;
     name: string;
@@ -203,7 +233,7 @@ export function getViewStateFull(
     fields?: { nodes?: Array<{ databaseId: number }> };
   };
   type Resp = { owner?: { projectV2?: { views?: { nodes?: Node[] } } } };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { views(first:50) { nodes { number name layout filter groupByFields(first:10) { nodes { ... on ProjectV2FieldCommon { databaseId } } } sortByFields(first:10) { nodes { direction field { ... on ProjectV2FieldCommon { databaseId } } } } verticalGroupByFields(first:10) { nodes { ... on ProjectV2FieldCommon { databaseId } } } fields(first:50) { nodes { ... on ProjectV2FieldCommon { databaseId } } } } } } } }`,
   );
   const views = data.owner?.projectV2?.views?.nodes ?? [];
@@ -224,12 +254,12 @@ export function getViewStateFull(
 }
 
 // Back-compat shim
-export function getViewState(
+export async function getViewState(
   org: string,
   projectNumber: number,
   viewNumber: number,
-): { number: number; name: string; layout: string; filter: string | null } {
-  return getViewStateFull(org, projectNumber, viewNumber);
+): Promise<{ number: number; name: string; layout: string; filter: string | null }> {
+  return await getViewStateFull(org, projectNumber, viewNumber);
 }
 
 export async function createView(
@@ -280,24 +310,24 @@ export interface IssueType {
   isEnabled: boolean;
 }
 
-export function getOrgId(org: string): string {
+export async function getOrgId(org: string): Promise<string> {
   // Issue types are org-only — explicitly use organization root.
   type Resp = { organization?: { id: string } };
-  const data = ghGraphQL<Resp>(`query { organization(login:"${org}") { id } }`);
+  const data = await ghGraphQL<Resp>(`query { organization(login:"${org}") { id } }`);
   if (!data.organization?.id) throw new Error(`Organization '${org}' not found`);
   return data.organization.id;
 }
 
-export function listIssueTypes(org: string): IssueType[] {
+export async function listIssueTypes(org: string): Promise<IssueType[]> {
   type Resp = { organization?: { issueTypes?: { nodes?: IssueType[] } } };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `query { organization(login:"${org}") { issueTypes(first:50) { nodes { id name description color isEnabled } } } }`,
   );
   return data.organization?.issueTypes?.nodes ?? [];
 }
 
-export function findIssueType(org: string, name: string): IssueType {
-  const types = listIssueTypes(org);
+export async function findIssueType(org: string, name: string): Promise<IssueType> {
+  const types = await listIssueTypes(org);
   const found = types.find((t) => t.name.toLowerCase() === name.toLowerCase());
   if (!found) {
     throw new Error(
@@ -307,45 +337,45 @@ export function findIssueType(org: string, name: string): IssueType {
   return found;
 }
 
-export function createIssueType(
+export async function createIssueType(
   org: string,
   args: { name: string; description?: string; color?: Color; isEnabled?: boolean },
-): IssueType {
-  const ownerId = getOrgId(org);
+): Promise<IssueType> {
+  const ownerId = await getOrgId(org);
   const desc = args.description ?? "";
   const color = args.color ?? "GRAY";
   const enabled = args.isEnabled ?? true;
   type Resp = { createIssueType?: { issueType: IssueType } };
-  const data = ghGraphQL<Resp>(
-    `mutation { createIssueType(input: {ownerId: "${ownerId}", name: "${args.name}", description: "${desc}", color: ${color}, isEnabled: ${enabled}}) { issueType { id name description color isEnabled } } }`,
+  const data = await ghGraphQL<Resp>(
+    `mutation { await createIssueType(input: {ownerId: "${ownerId}", name: "${args.name}", description: "${desc}", color: ${color}, isEnabled: ${enabled}}) { issueType { id name description color isEnabled } } }`,
   );
   if (!data.createIssueType?.issueType) throw new Error("createIssueType returned no issueType");
   return data.createIssueType.issueType;
 }
 
-export function updateIssueType(
+export async function updateIssueType(
   org: string,
   name: string,
   changes: { name?: string; description?: string; color?: Color; isEnabled?: boolean },
-): IssueType {
-  const t = findIssueType(org, name);
+): Promise<IssueType> {
+  const t = await findIssueType(org, name);
   const parts: string[] = [`issueTypeId: "${t.id}"`];
   if (changes.name !== undefined) parts.push(`name: "${changes.name}"`);
   if (changes.description !== undefined) parts.push(`description: "${changes.description}"`);
   if (changes.color !== undefined) parts.push(`color: ${changes.color}`);
   if (changes.isEnabled !== undefined) parts.push(`isEnabled: ${changes.isEnabled}`);
   type Resp = { updateIssueType?: { issueType: IssueType } };
-  const data = ghGraphQL<Resp>(
-    `mutation { updateIssueType(input: {${parts.join(", ")}}) { issueType { id name description color isEnabled } } }`,
+  const data = await ghGraphQL<Resp>(
+    `mutation { await updateIssueType(input: {${parts.join(", ")}}) { issueType { id name description color isEnabled } } }`,
   );
   if (!data.updateIssueType?.issueType) throw new Error("updateIssueType returned no issueType");
   return data.updateIssueType.issueType;
 }
 
-export function deleteIssueType(org: string, name: string): void {
-  const t = findIssueType(org, name);
-  ghGraphQL<{ deleteIssueType?: unknown }>(
-    `mutation { deleteIssueType(input: {issueTypeId: "${t.id}"}) { clientMutationId } }`,
+export async function deleteIssueType(org: string, name: string): Promise<void> {
+  const t = await findIssueType(org, name);
+  await ghGraphQL<{ deleteIssueType?: unknown }>(
+    `mutation { await deleteIssueType(input: {issueTypeId: "${t.id}"}) { clientMutationId } }`,
   );
 }
 
@@ -353,9 +383,9 @@ export function deleteIssueType(org: string, name: string): void {
 // Issue Type assignment to issues
 // ────────────────────────────────────────────────────────────────────────────
 
-function getIssueId(owner: string, repo: string, number: number): string {
+async function getIssueId(owner: string, repo: string, number: number): Promise<string> {
   type Resp = { repository?: { issue?: { id: string } } };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `query { repository(owner:"${owner}", name:"${repo}") { issue(number:${number}) { id } } }`,
   );
   if (!data.repository?.issue?.id) {
@@ -364,25 +394,25 @@ function getIssueId(owner: string, repo: string, number: number): string {
   return data.repository.issue.id;
 }
 
-export function setIssueType(
+export async function setIssueType(
   org: string,
   owner: string,
   repo: string,
   number: number,
   typeName: string,
-): void {
-  const t = findIssueType(org, typeName);
-  const id = getIssueId(owner, repo, number);
-  ghGraphQL<{ updateIssue?: unknown }>(
+): Promise<void> {
+  const t = await findIssueType(org, typeName);
+  const id = await getIssueId(owner, repo, number);
+  await ghGraphQL<{ updateIssue?: unknown }>(
     `mutation { updateIssue(input: {id: "${id}", issueTypeId: "${t.id}"}) { issue { number } } }`,
   );
 }
 
-export function listRepoIssues(
+export async function listRepoIssues(
   owner: string,
   repo: string,
   filter: { state?: "OPEN" | "CLOSED" | "ALL"; milestone?: number; label?: string } = {},
-): Array<{ id: string; number: number; title: string }> {
+): Promise<Array<{ id: string; number: number; title: string }>> {
   const stateClause = filter.state && filter.state !== "ALL" ? `, states: [${filter.state}]` : "";
   const labelClause = filter.label ? `, filterBy: {labels: ["${filter.label}"]}` : "";
   type Resp = {
@@ -390,7 +420,7 @@ export function listRepoIssues(
       issues?: { nodes?: Array<{ id: string; number: number; title: string; milestone: { number: number } | null }> };
     };
   };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `query { repository(owner:"${owner}", name:"${repo}") { issues(first:100${stateClause}${labelClause}, orderBy:{field:CREATED_AT, direction:ASC}) { nodes { id number title milestone { number } } } } }`,
   );
   let issues = data.repository?.issues?.nodes ?? [];
@@ -400,20 +430,20 @@ export function listRepoIssues(
   return issues;
 }
 
-export function bulkSetIssueType(
+export async function bulkSetIssueType(
   org: string,
   owner: string,
   repo: string,
   typeName: string,
   filter: { state?: "OPEN" | "CLOSED" | "ALL"; milestone?: number; label?: string } = {},
-): { applied: number; skipped: number; total: number } {
-  const t = findIssueType(org, typeName);
-  const issues = listRepoIssues(owner, repo, filter);
+): Promise<{ applied: number; skipped: number; total: number }> {
+  const t = await findIssueType(org, typeName);
+  const issues = await listRepoIssues(owner, repo, filter);
   let applied = 0;
   let skipped = 0;
   for (const i of issues) {
     try {
-      ghGraphQL<{ updateIssue?: unknown }>(
+      await ghGraphQL<{ updateIssue?: unknown }>(
         `mutation { updateIssue(input: {id: "${i.id}", issueTypeId: "${t.id}"}) { issue { number } } }`,
       );
       applied++;
@@ -442,7 +472,7 @@ export interface ProjectField {
   options?: FieldOption[];
 }
 
-export function listProjectFields(org: string, projectNumber: number): ProjectField[] {
+export async function listProjectFields(org: string, projectNumber: number): Promise<ProjectField[]> {
   type Resp = {
     owner?: { projectV2?: {
         fields?: {
@@ -454,14 +484,14 @@ export function listProjectFields(org: string, projectNumber: number): ProjectFi
       };
     };
   };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { fields(first:50) { nodes { ... on ProjectV2FieldCommon { id name dataType } ... on ProjectV2SingleSelectField { id name dataType options { id name color description } } } } } } }`,
   );
   return (data.owner?.projectV2?.fields?.nodes ?? []) as ProjectField[];
 }
 
-export function findProjectField(org: string, projectNumber: number, name: string): ProjectField {
-  const fields = listProjectFields(org, projectNumber);
+export async function findProjectField(org: string, projectNumber: number, name: string): Promise<ProjectField> {
+  const fields = await listProjectFields(org, projectNumber);
   const found = fields.find((f) => f.name === name);
   if (!found) {
     throw new Error(
@@ -471,14 +501,14 @@ export function findProjectField(org: string, projectNumber: number, name: strin
   return found;
 }
 
-export function updateFieldName(
+export async function updateFieldName(
   org: string,
   projectNumber: number,
   fieldName: string,
   newName: string,
-): void {
-  const field = findProjectField(org, projectNumber, fieldName);
-  ghGraphQL<{ updateProjectV2Field?: unknown }>(
+): Promise<void> {
+  const field = await findProjectField(org, projectNumber, fieldName);
+  await ghGraphQL<{ updateProjectV2Field?: unknown }>(
     `mutation { updateProjectV2Field(input: {fieldId: "${field.id}", name: "${newName}"}) { projectV2Field { ... on ProjectV2FieldCommon { id name } } } }`,
   );
 }
@@ -487,13 +517,13 @@ export function updateFieldName(
  * Replace ALL single-select options on a field. Caller passes the full new list.
  * Useful as building block for add/update/delete-one operations.
  */
-export function setFieldOptions(
+export async function setFieldOptions(
   org: string,
   projectNumber: number,
   fieldName: string,
   options: Array<{ id?: string; name: string; color: Color; description: string }>,
-): void {
-  const field = findProjectField(org, projectNumber, fieldName);
+): Promise<void> {
+  const field = await findProjectField(org, projectNumber, fieldName);
   if (!field.options) {
     throw new Error(`Field '${fieldName}' is not a single-select field`);
   }
@@ -501,20 +531,20 @@ export function setFieldOptions(
     const idPart = o.id ? `id: "${o.id}", ` : "";
     return `{${idPart}name: "${o.name}", color: ${o.color}, description: "${o.description}"}`;
   }).join(", ");
-  ghGraphQL<{ updateProjectV2Field?: unknown }>(
+  await ghGraphQL<{ updateProjectV2Field?: unknown }>(
     `mutation { updateProjectV2Field(input: {fieldId: "${field.id}", singleSelectOptions: [${optsLiteral}]}) { projectV2Field { ... on ProjectV2SingleSelectField { id name } } } }`,
   );
 }
 
-export function addFieldOption(
+export async function addFieldOption(
   org: string,
   projectNumber: number,
   fieldName: string,
   optionName: string,
   color: Color = "GRAY",
   description: string = "",
-): void {
-  const field = findProjectField(org, projectNumber, fieldName);
+): Promise<void> {
+  const field = await findProjectField(org, projectNumber, fieldName);
   if (!field.options) throw new Error(`Field '${fieldName}' is not single-select`);
   if (field.options.some((o) => o.name === optionName)) {
     throw new Error(`Option '${optionName}' already exists on field '${fieldName}'`);
@@ -523,17 +553,17 @@ export function addFieldOption(
     ...field.options.map((o) => ({ id: o.id, name: o.name, color: o.color, description: o.description ?? "" })),
     { name: optionName, color, description },
   ];
-  setFieldOptions(org, projectNumber, fieldName, next);
+  await setFieldOptions(org, projectNumber, fieldName, next);
 }
 
-export function updateFieldOption(
+export async function updateFieldOption(
   org: string,
   projectNumber: number,
   fieldName: string,
   optionName: string,
   changes: { name?: string; color?: Color; description?: string },
-): void {
-  const field = findProjectField(org, projectNumber, fieldName);
+): Promise<void> {
+  const field = await findProjectField(org, projectNumber, fieldName);
   if (!field.options) throw new Error(`Field '${fieldName}' is not single-select`);
   const next = field.options.map((o) => {
     if (o.name === optionName) {
@@ -549,16 +579,16 @@ export function updateFieldOption(
   if (!field.options.some((o) => o.name === optionName)) {
     throw new Error(`Option '${optionName}' not found on field '${fieldName}'`);
   }
-  setFieldOptions(org, projectNumber, fieldName, next);
+  await setFieldOptions(org, projectNumber, fieldName, next);
 }
 
-export function deleteFieldOption(
+export async function deleteFieldOption(
   org: string,
   projectNumber: number,
   fieldName: string,
   optionName: string,
-): void {
-  const field = findProjectField(org, projectNumber, fieldName);
+): Promise<void> {
+  const field = await findProjectField(org, projectNumber, fieldName);
   if (!field.options) throw new Error(`Field '${fieldName}' is not single-select`);
   const next = field.options
     .filter((o) => o.name !== optionName)
@@ -566,7 +596,7 @@ export function deleteFieldOption(
   if (next.length === field.options.length) {
     throw new Error(`Option '${optionName}' not found on field '${fieldName}'`);
   }
-  setFieldOptions(org, projectNumber, fieldName, next);
+  await setFieldOptions(org, projectNumber, fieldName, next);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -580,7 +610,7 @@ export interface ProjectItem {
   fields: Record<string, string>; // field name → value (text representation)
 }
 
-export function listProjectItems(org: string, projectNumber: number): ProjectItem[] {
+export async function listProjectItems(org: string, projectNumber: number): Promise<ProjectItem[]> {
   type Resp = {
     owner?: { projectV2?: {
         items?: {
@@ -602,7 +632,7 @@ export function listProjectItems(org: string, projectNumber: number): ProjectIte
       };
     };
   };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { items(first:100) { nodes { id content { ... on Issue { number title } ... on PullRequest { number title } ... on DraftIssue { title } } fieldValues(first:30) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { __typename name field { ... on ProjectV2SingleSelectField { name } } } ... on ProjectV2ItemFieldTextValue { __typename text field { ... on ProjectV2Field { name } } } ... on ProjectV2ItemFieldNumberValue { __typename number field { ... on ProjectV2Field { name } } } ... on ProjectV2ItemFieldDateValue { __typename date field { ... on ProjectV2Field { name } } } } } } } } } }`,
   );
   const items = data.owner?.projectV2?.items?.nodes ?? [];
@@ -623,9 +653,9 @@ export function listProjectItems(org: string, projectNumber: number): ProjectIte
   });
 }
 
-export function getProjectId(org: string, projectNumber: number): string {
+export async function getProjectId(org: string, projectNumber: number): Promise<string> {
   type Resp = { owner?: { projectV2?: { id: string } } };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { id } } }`,
   );
   if (!data.owner?.projectV2?.id) {
@@ -637,13 +667,13 @@ export function getProjectId(org: string, projectNumber: number): string {
 /**
  * Set a single-select field value on one item.
  */
-export function setItemSingleSelect(
+export async function setItemSingleSelect(
   projectNodeId: string,
   itemId: string,
   fieldId: string,
   optionId: string,
-): void {
-  ghGraphQL<{ updateProjectV2ItemFieldValue?: unknown }>(
+): Promise<void> {
+  await ghGraphQL<{ updateProjectV2ItemFieldValue?: unknown }>(
     `mutation { updateProjectV2ItemFieldValue(input: {projectId: "${projectNodeId}", itemId: "${itemId}", fieldId: "${fieldId}", value: {singleSelectOptionId: "${optionId}"}}) { projectV2Item { id } } }`,
   );
 }
@@ -651,15 +681,15 @@ export function setItemSingleSelect(
 /**
  * Bulk set a single-select field value on items matching --where filter.
  */
-export function bulkSetSingleSelect(
+export async function bulkSetSingleSelect(
   org: string,
   projectNumber: number,
   targetFieldName: string,
   targetValue: string,
   where: { field: string; value: string } | null,
-): { applied: number; total: number; matched: number } {
-  const projectNodeId = getProjectId(org, projectNumber);
-  const targetField = findProjectField(org, projectNumber, targetFieldName);
+): Promise<{ applied: number; total: number; matched: number }> {
+  const projectNodeId = await getProjectId(org, projectNumber);
+  const targetField = await findProjectField(org, projectNumber, targetFieldName);
   if (!targetField.options) {
     throw new Error(`Field '${targetFieldName}' is not single-select`);
   }
@@ -670,14 +700,14 @@ export function bulkSetSingleSelect(
     );
   }
 
-  const items = listProjectItems(org, projectNumber);
+  const items = await listProjectItems(org, projectNumber);
   const matched = where
     ? items.filter((i) => i.fields[where.field] === where.value)
     : items;
 
   let applied = 0;
   for (const i of matched) {
-    setItemSingleSelect(projectNodeId, i.itemId, targetField.id, targetOpt.id);
+    await setItemSingleSelect(projectNodeId, i.itemId, targetField.id, targetOpt.id);
     applied++;
   }
   return { applied, total: items.length, matched: matched.length };
@@ -691,13 +721,13 @@ export function bulkSetSingleSelect(
  * Update colors of multiple options on a single-select field in one call.
  * Options not in the map keep their current color.
  */
-export function recolorOptions(
+export async function recolorOptions(
   org: string,
   projectNumber: number,
   fieldName: string,
   colorMap: Record<string, Color>,
-): { changed: number; skipped: string[] } {
-  const field = findProjectField(org, projectNumber, fieldName);
+): Promise<{ changed: number; skipped: string[] }> {
+  const field = await findProjectField(org, projectNumber, fieldName);
   if (!field.options) throw new Error(`Field '${fieldName}' is not single-select`);
   const skipped: string[] = [];
   let changed = 0;
@@ -713,7 +743,7 @@ export function recolorOptions(
   for (const name of Object.keys(colorMap)) {
     if (!field.options.some((o) => o.name === name)) skipped.push(name);
   }
-  if (changed > 0) setFieldOptions(org, projectNumber, fieldName, next);
+  if (changed > 0) await setFieldOptions(org, projectNumber, fieldName, next);
   return { changed, skipped };
 }
 
@@ -728,12 +758,12 @@ export type FieldValueInput =
   | { type: "date"; date: string }     // YYYY-MM-DD
   | { type: "iteration"; iterationId: string };
 
-function setItemFieldValue(
+async function setItemFieldValue(
   projectNodeId: string,
   itemId: string,
   fieldId: string,
   value: FieldValueInput,
-): void {
+): Promise<void> {
   let valLiteral: string;
   switch (value.type) {
     case "singleSelect": valLiteral = `{singleSelectOptionId: "${value.optionId}"}`; break;
@@ -742,7 +772,7 @@ function setItemFieldValue(
     case "date":         valLiteral = `{date: "${value.date}"}`; break;
     case "iteration":    valLiteral = `{iterationId: "${value.iterationId}"}`; break;
   }
-  ghGraphQL<{ updateProjectV2ItemFieldValue?: unknown }>(
+  await ghGraphQL<{ updateProjectV2ItemFieldValue?: unknown }>(
     `mutation { updateProjectV2ItemFieldValue(input: {projectId: "${projectNodeId}", itemId: "${itemId}", fieldId: "${fieldId}", value: ${valLiteral}}) { projectV2Item { id } } }`,
   );
 }
@@ -751,15 +781,15 @@ function setItemFieldValue(
  * Bulk set any-typed field value. For single-select pass option name as value.
  * For text/number/date, pass the raw value.
  */
-export function bulkSetField(
+export async function bulkSetField(
   org: string,
   projectNumber: number,
   fieldName: string,
   rawValue: string,
   where: { field: string; value: string } | null,
-): { applied: number; total: number; matched: number; valueType: string } {
-  const projectNodeId = getProjectId(org, projectNumber);
-  const field = findProjectField(org, projectNumber, fieldName);
+): Promise<{ applied: number; total: number; matched: number; valueType: string }> {
+  const projectNodeId = await getProjectId(org, projectNumber);
+  const field = await findProjectField(org, projectNumber, fieldName);
 
   let value: FieldValueInput;
   let valueType: string;
@@ -791,12 +821,12 @@ export function bulkSetField(
     throw new Error(`Unsupported field dataType: ${field.dataType}. Use single-select, text, number, or date fields.`);
   }
 
-  const items = listProjectItems(org, projectNumber);
+  const items = await listProjectItems(org, projectNumber);
   const matched = where ? items.filter((i) => i.fields[where.field] === where.value) : items;
 
   let applied = 0;
   for (const i of matched) {
-    setItemFieldValue(projectNodeId, i.itemId, field.id, value);
+    await setItemFieldValue(projectNodeId, i.itemId, field.id, value);
     applied++;
   }
   return { applied, total: items.length, matched: matched.length, valueType };
@@ -805,21 +835,21 @@ export function bulkSetField(
 /**
  * Bulk clear a field value (returns it to unset).
  */
-export function bulkClearField(
+export async function bulkClearField(
   org: string,
   projectNumber: number,
   fieldName: string,
   where: { field: string; value: string } | null,
-): { applied: number; total: number; matched: number } {
-  const projectNodeId = getProjectId(org, projectNumber);
-  const field = findProjectField(org, projectNumber, fieldName);
+): Promise<{ applied: number; total: number; matched: number }> {
+  const projectNodeId = await getProjectId(org, projectNumber);
+  const field = await findProjectField(org, projectNumber, fieldName);
 
-  const items = listProjectItems(org, projectNumber);
+  const items = await listProjectItems(org, projectNumber);
   const matched = where ? items.filter((i) => i.fields[where.field] === where.value) : items;
 
   let applied = 0;
   for (const i of matched) {
-    ghGraphQL<{ clearProjectV2ItemFieldValue?: unknown }>(
+    await ghGraphQL<{ clearProjectV2ItemFieldValue?: unknown }>(
       `mutation { clearProjectV2ItemFieldValue(input: {projectId: "${projectNodeId}", itemId: "${i.itemId}", fieldId: "${field.id}"}) { projectV2Item { id } } }`,
     );
     applied++;
@@ -827,17 +857,17 @@ export function bulkClearField(
   return { applied, total: items.length, matched: matched.length };
 }
 
-export function bulkArchive(
+export async function bulkArchive(
   org: string,
   projectNumber: number,
   where: { field: string; value: string } | null,
-): { applied: number; total: number; matched: number } {
-  const projectNodeId = getProjectId(org, projectNumber);
-  const items = listProjectItems(org, projectNumber);
+): Promise<{ applied: number; total: number; matched: number }> {
+  const projectNodeId = await getProjectId(org, projectNumber);
+  const items = await listProjectItems(org, projectNumber);
   const matched = where ? items.filter((i) => i.fields[where.field] === where.value) : items;
   let applied = 0;
   for (const i of matched) {
-    ghGraphQL<{ archiveProjectV2Item?: unknown }>(
+    await ghGraphQL<{ archiveProjectV2Item?: unknown }>(
       `mutation { archiveProjectV2Item(input: {projectId: "${projectNodeId}", itemId: "${i.itemId}"}) { item { id } } }`,
     );
     applied++;
@@ -853,15 +883,15 @@ export function bulkArchive(
  * use the web UI's archived view (filterQuery=is:archived) URL or capture via
  * the page HTML. Callers must pass IDs.
  */
-export function bulkUnarchive(
+export async function bulkUnarchive(
   org: string,
   projectNumber: number,
   itemNodeIds: string[],
-): { applied: number } {
-  const projectNodeId = getProjectId(org, projectNumber);
+): Promise<{ applied: number }> {
+  const projectNodeId = await getProjectId(org, projectNumber);
   let applied = 0;
   for (const id of itemNodeIds) {
-    ghGraphQL<{ unarchiveProjectV2Item?: unknown }>(
+    await ghGraphQL<{ unarchiveProjectV2Item?: unknown }>(
       `mutation { unarchiveProjectV2Item(input: {projectId: "${projectNodeId}", itemId: "${id}"}) { item { id } } }`,
     );
     applied++;
@@ -869,13 +899,13 @@ export function bulkUnarchive(
   return { applied };
 }
 
-export function moveItem(
+export async function moveItem(
   projectNodeId: string,
   itemId: string,
   afterItemId: string | null,
-): void {
+): Promise<void> {
   const afterClause = afterItemId ? `, afterId: "${afterItemId}"` : "";
-  ghGraphQL<{ updateProjectV2ItemPosition?: unknown }>(
+  await ghGraphQL<{ updateProjectV2ItemPosition?: unknown }>(
     `mutation { updateProjectV2ItemPosition(input: {projectId: "${projectNodeId}", itemId: "${itemId}"${afterClause}}) { items(first:1) { nodes { id } } } }`,
   );
 }
@@ -884,30 +914,30 @@ export function moveItem(
 // Field create (extended types)
 // ────────────────────────────────────────────────────────────────────────────
 
-export function createTextField(org: string, projectNumber: number, name: string): { id: string; databaseId: number } {
-  const projectId = getProjectId(org, projectNumber);
+export async function createTextField(org: string, projectNumber: number, name: string): Promise<{ id: string; databaseId: number }> {
+  const projectId = await getProjectId(org, projectNumber);
   type Resp = { createProjectV2Field?: { projectV2Field: { id: string; databaseId: number } } };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `mutation { createProjectV2Field(input: {projectId: "${projectId}", dataType: TEXT, name: "${name}"}) { projectV2Field { ... on ProjectV2FieldCommon { id databaseId } } } }`,
   );
   if (!data.createProjectV2Field?.projectV2Field) throw new Error("createProjectV2Field returned no field");
   return data.createProjectV2Field.projectV2Field;
 }
 
-export function createNumberField(org: string, projectNumber: number, name: string): { id: string; databaseId: number } {
-  const projectId = getProjectId(org, projectNumber);
+export async function createNumberField(org: string, projectNumber: number, name: string): Promise<{ id: string; databaseId: number }> {
+  const projectId = await getProjectId(org, projectNumber);
   type Resp = { createProjectV2Field?: { projectV2Field: { id: string; databaseId: number } } };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `mutation { createProjectV2Field(input: {projectId: "${projectId}", dataType: NUMBER, name: "${name}"}) { projectV2Field { ... on ProjectV2FieldCommon { id databaseId } } } }`,
   );
   if (!data.createProjectV2Field?.projectV2Field) throw new Error("createProjectV2Field returned no field");
   return data.createProjectV2Field.projectV2Field;
 }
 
-export function createDateField(org: string, projectNumber: number, name: string): { id: string; databaseId: number } {
-  const projectId = getProjectId(org, projectNumber);
+export async function createDateField(org: string, projectNumber: number, name: string): Promise<{ id: string; databaseId: number }> {
+  const projectId = await getProjectId(org, projectNumber);
   type Resp = { createProjectV2Field?: { projectV2Field: { id: string; databaseId: number } } };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `mutation { createProjectV2Field(input: {projectId: "${projectId}", dataType: DATE, name: "${name}"}) { projectV2Field { ... on ProjectV2FieldCommon { id databaseId } } } }`,
   );
   if (!data.createProjectV2Field?.projectV2Field) throw new Error("createProjectV2Field returned no field");
@@ -917,16 +947,16 @@ export function createDateField(org: string, projectNumber: number, name: string
 /**
  * Iteration field — needs startDate + duration. iterations array auto-populated by GitHub.
  */
-export function createIterationField(
+export async function createIterationField(
   org: string,
   projectNumber: number,
   name: string,
   startDate: string,
   duration: number,
-): { id: string; databaseId: number } {
-  const projectId = getProjectId(org, projectNumber);
+): Promise<{ id: string; databaseId: number }> {
+  const projectId = await getProjectId(org, projectNumber);
   type Resp = { createProjectV2Field?: { projectV2Field: { id: string; databaseId: number } } };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `mutation { createProjectV2Field(input: {projectId: "${projectId}", dataType: ITERATION, name: "${name}", iterationConfiguration: {startDate: "${startDate}", duration: ${duration}, iterations: []}}) { projectV2Field { ... on ProjectV2FieldCommon { id databaseId } } } }`,
   );
   if (!data.createProjectV2Field?.projectV2Field) throw new Error("createProjectV2Field returned no field");
@@ -949,57 +979,57 @@ export interface StatusUpdate {
   createdAt: string;
 }
 
-export function listStatusUpdates(org: string, projectNumber: number): StatusUpdate[] {
+export async function listStatusUpdates(org: string, projectNumber: number): Promise<StatusUpdate[]> {
   type Resp = {
     owner?: { projectV2?: {
         statusUpdates?: { nodes?: StatusUpdate[] };
       };
     };
   };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { statusUpdates(first:50) { nodes { id fullDatabaseId body status startDate targetDate createdAt } } } } }`,
   );
   return data.owner?.projectV2?.statusUpdates?.nodes ?? [];
 }
 
-export function createStatusUpdate(
+export async function createStatusUpdate(
   org: string,
   projectNumber: number,
   body: string,
   opts: { status?: StatusUpdateStatus; startDate?: string; targetDate?: string } = {},
-): StatusUpdate {
-  const projectId = getProjectId(org, projectNumber);
+): Promise<StatusUpdate> {
+  const projectId = await getProjectId(org, projectNumber);
   const parts: string[] = [`projectId: "${projectId}"`, `body: ${JSON.stringify(body)}`];
   if (opts.status) parts.push(`status: ${opts.status}`);
   if (opts.startDate) parts.push(`startDate: "${opts.startDate}"`);
   if (opts.targetDate) parts.push(`targetDate: "${opts.targetDate}"`);
   type Resp = { createProjectV2StatusUpdate?: { statusUpdate: StatusUpdate } };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `mutation { createProjectV2StatusUpdate(input: {${parts.join(", ")}}) { statusUpdate { id fullDatabaseId body status startDate targetDate createdAt } } }`,
   );
   if (!data.createProjectV2StatusUpdate?.statusUpdate) throw new Error("createProjectV2StatusUpdate returned no update");
   return data.createProjectV2StatusUpdate.statusUpdate;
 }
 
-export function updateStatusUpdate(
+export async function updateStatusUpdate(
   statusUpdateId: string,
   changes: { body?: string; status?: StatusUpdateStatus; startDate?: string; targetDate?: string },
-): StatusUpdate {
+): Promise<StatusUpdate> {
   const parts: string[] = [`statusUpdateId: "${statusUpdateId}"`];
   if (changes.body !== undefined) parts.push(`body: ${JSON.stringify(changes.body)}`);
   if (changes.status !== undefined) parts.push(`status: ${changes.status}`);
   if (changes.startDate !== undefined) parts.push(`startDate: "${changes.startDate}"`);
   if (changes.targetDate !== undefined) parts.push(`targetDate: "${changes.targetDate}"`);
   type Resp = { updateProjectV2StatusUpdate?: { statusUpdate: StatusUpdate } };
-  const data = ghGraphQL<Resp>(
+  const data = await ghGraphQL<Resp>(
     `mutation { updateProjectV2StatusUpdate(input: {${parts.join(", ")}}) { statusUpdate { id fullDatabaseId body status startDate targetDate createdAt } } }`,
   );
   if (!data.updateProjectV2StatusUpdate?.statusUpdate) throw new Error("updateProjectV2StatusUpdate returned no update");
   return data.updateProjectV2StatusUpdate.statusUpdate;
 }
 
-export function deleteStatusUpdate(statusUpdateId: string): void {
-  ghGraphQL<{ deleteProjectV2StatusUpdate?: unknown }>(
+export async function deleteStatusUpdate(statusUpdateId: string): Promise<void> {
+  await ghGraphQL<{ deleteProjectV2StatusUpdate?: unknown }>(
     `mutation { deleteProjectV2StatusUpdate(input: {statusUpdateId: "${statusUpdateId}"}) { clientMutationId } }`,
   );
 }

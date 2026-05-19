@@ -35,7 +35,7 @@ export const itemFieldSetCommand = defineCommand({
 
     if (args["dry-run"]) {
       const { listProjectItems } = await import("../../../api.js");
-      const items = listProjectItems(org, project);
+      const items = await listProjectItems(org, project);
       const matched = where ? items.filter((i) => i.fields[where.field] === where.value) : items;
       console.log(`Would set ${field}=${value} on ${matched.length}/${items.length} items:`);
       for (const m of matched.slice(0, 20)) {
@@ -45,7 +45,7 @@ export const itemFieldSetCommand = defineCommand({
       return;
     }
 
-    const result = bulkSetField(org, project, field, value, where);
+    const result = await bulkSetField(org, project, field, value, where);
     console.log(
       `✓ Set ${field}=${value} (${result.valueType}) on ${result.applied}/${result.matched} matched items (total: ${result.total})`,
     );

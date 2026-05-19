@@ -36,7 +36,7 @@ export const optionRecolorCommand = defineCommand({
   },
   async run({ args }) {
     const map = parseMap(String(args.map));
-    const result = recolorOptions(String(args.org), Number(args.project), String(args.field), map);
+    const result = await recolorOptions(String(args.org), Number(args.project), String(args.field), map);
     console.log(`✓ Recolored ${result.changed} option(s) on '${args.field}'`);
     if (result.skipped.length > 0) {
       console.log(`  ⚠ Unknown option names (skipped): ${result.skipped.join(", ")}`);

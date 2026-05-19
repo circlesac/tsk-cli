@@ -53,7 +53,7 @@ export const viewUpdateCommand = defineCommand({
     const project = Number(args.project);
     const viewNum = Number(args.view);
 
-    const existing = getViewStateFull(org, project, viewNum);
+    const existing = await getViewStateFull(org, project, viewNum);
 
     const incomingLayout = args.layout
       ? (LAYOUT_MAP[String(args.layout).toLowerCase()] ?? LAYOUT_MAP[String(args.layout)])

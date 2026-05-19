@@ -21,7 +21,7 @@ export const chartCreateCommand = defineCommand({
     const xField = String(args["x-field"]);
     let xColumn: number | string = xField;
     if (xField !== "time") {
-      const f = findProjectField(org, project, xField);
+      const f = await findProjectField(org, project, xField);
       xColumn = f.id ? Number((f as { databaseId?: number }).databaseId ?? 0) || xField : xField;
       // Fallback: try resolve via dataType-aware lookup since findProjectField uses id (node ID)
       // For chart endpoint we need numeric databaseId. Use REST API to be safe.

@@ -236,3 +236,27 @@ export function openLoginPage(): void {
     console.error("Could not open browser. Manually visit https://github.com/login");
   }
 }
+
+/**
+ * Try to obtain a Bearer token for api.github.com.
+ *
+ * Order:
+ *   1. Explicit --gh-token override (caller pass)
+ *   2. `gh config get -h github.com oauth_token` (works if user did `gh auth login`)
+ *   3. Returns undefined → caller decides whether to error
+ *
+ * The captured token is stored once in tsk credentials so subsequent
+ * tsk commands don't need to shell out to gh.
+ */
+export function captureGhToken(override?: string): string | undefined {
+  if (override && override.trim()) return override.trim();
+  try {
+    const out = execSync(`gh config get -h github.com oauth_token`, {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    return out || undefined;
+  } catch {
+    return undefined;
+  }
+}

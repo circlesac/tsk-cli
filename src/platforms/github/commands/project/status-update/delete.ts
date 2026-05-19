@@ -9,14 +9,14 @@ export const statusUpdateDeleteCommand = defineCommand({
     id: { type: "positional", description: "Status update fullDatabaseId", required: true },
   },
   async run({ args }) {
-    const updates = listStatusUpdates(String(args.org), Number(args.project));
+    const updates = await listStatusUpdates(String(args.org), Number(args.project));
     const wanted = Number(args.id);
     const target = updates.find((u) => Number(u.fullDatabaseId) === wanted);
     if (!target) {
       console.error(`Status update #${wanted} not found`);
       process.exit(1);
     }
-    deleteStatusUpdate(target.id);
+    await deleteStatusUpdate(target.id);
     console.log(`✓ Deleted status update #${wanted}`);
   },
 });

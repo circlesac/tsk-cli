@@ -27,7 +27,7 @@ export const statusUpdateCreateCommand = defineCommand({
     if (args["start-date"]) opts.startDate = String(args["start-date"]);
     if (args["target-date"]) opts.targetDate = String(args["target-date"]);
 
-    const u = createStatusUpdate(String(args.org), Number(args.project), String(args.body), opts);
+    const u = await createStatusUpdate(String(args.org), Number(args.project), String(args.body), opts);
     console.log(`✓ Created status update #${u.fullDatabaseId} (status: ${u.status ?? "—"})`);
   },
 });

@@ -10,7 +10,7 @@ export const fieldUpdateCommand = defineCommand({
     name: { type: "string", description: "New field name", required: true },
   },
   async run({ args }) {
-    updateFieldName(String(args.org), Number(args.project), String(args.field), String(args.name));
+    await updateFieldName(String(args.org), Number(args.project), String(args.field), String(args.name));
     console.log(`✓ Renamed field '${args.field}' → '${args.name}'`);
   },
 });

@@ -4,6 +4,13 @@ export interface GitHubCookies {
   dotcomUser: string;
   browser: string;
   storedAt: number;
+  /**
+   * GitHub PAT or OAuth token, used for api.github.com (Bearer auth).
+   * Captured during `tsk github auth login` from gh CLI's stored token
+   * (or via --gh-token flag). The /memexes/ endpoints don't accept Bearer
+   * so we keep both this token and the browser session cookie.
+   */
+  ghToken?: string;
 }
 
 export type ViewLayout = "table_layout" | "board_layout" | "roadmap_layout";

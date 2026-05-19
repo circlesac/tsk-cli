@@ -9,7 +9,7 @@ export const fieldListCommand = defineCommand({
     json: { type: "boolean", description: "Output as JSON", default: false },
   },
   async run({ args }) {
-    const fields = listProjectFields(String(args.org), Number(args.project));
+    const fields = await listProjectFields(String(args.org), Number(args.project));
     if (args.json) {
       console.log(JSON.stringify(fields, null, 2));
       return;

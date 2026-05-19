@@ -26,9 +26,9 @@ export const fieldCreateCommand = defineCommand({
 
     let result: { id: string; databaseId: number };
     switch (type) {
-      case "text":   result = createTextField(org, project, name); break;
-      case "number": result = createNumberField(org, project, name); break;
-      case "date":   result = createDateField(org, project, name); break;
+      case "text":   result = await createTextField(org, project, name); break;
+      case "number": result = await createNumberField(org, project, name); break;
+      case "date":   result = await createDateField(org, project, name); break;
       case "iteration": {
         const start = String(args["iteration-start"] ?? "");
         const dur = Number(args["iteration-duration"] ?? 0);
@@ -40,7 +40,7 @@ export const fieldCreateCommand = defineCommand({
           console.error("--iteration-duration (days) required for iteration field");
           process.exit(1);
         }
-        result = createIterationField(org, project, name, start, dur);
+        result = await createIterationField(org, project, name, start, dur);
         break;
       }
       default:

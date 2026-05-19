@@ -18,8 +18,8 @@ export const itemMoveCommand = defineCommand({
     const itemNum = Number(args.item);
     const afterNum = args.after ? Number(args.after) : null;
 
-    const projectId = getProjectId(org, project);
-    const items = listProjectItems(org, project);
+    const projectId = await getProjectId(org, project);
+    const items = await listProjectItems(org, project);
     const target = items.find((i) => i.contentNumber === itemNum);
     if (!target) {
       console.error(`Item with content #${itemNum} not found in project`);
@@ -34,7 +34,7 @@ export const itemMoveCommand = defineCommand({
       }
       afterItemId = a.itemId;
     }
-    moveItem(projectId, target.itemId, afterItemId);
+    await moveItem(projectId, target.itemId, afterItemId);
     console.log(
       afterItemId
         ? `✓ Moved #${itemNum} after #${afterNum}`

@@ -8,7 +8,7 @@ export const issueTypeListCommand = defineCommand({
     json: { type: "boolean", description: "Output as JSON", default: false },
   },
   async run({ args }) {
-    const types = listIssueTypes(String(args.org));
+    const types = await listIssueTypes(String(args.org));
     if (args.json) {
       console.log(JSON.stringify(types, null, 2));
       return;

@@ -8,7 +8,7 @@ export const issueTypeDeleteCommand = defineCommand({
     name: { type: "positional", description: "Issue Type name to delete", required: true },
   },
   async run({ args }) {
-    deleteIssueType(String(args.org), String(args.name));
+    await deleteIssueType(String(args.org), String(args.name));
     console.log(`✓ Deleted Issue Type '${args.name}' from ${args.org}`);
   },
 });

@@ -10,7 +10,7 @@ export const optionDeleteCommand = defineCommand({
     option: { type: "positional", description: "Option name to delete", required: true },
   },
   async run({ args }) {
-    deleteFieldOption(
+    await deleteFieldOption(
       String(args.org),
       Number(args.project),
       String(args.field),

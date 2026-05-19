@@ -24,7 +24,7 @@ export const itemFieldClearCommand = defineCommand({
     const field = String(args.field);
 
     if (args["dry-run"]) {
-      const items = listProjectItems(org, project);
+      const items = await listProjectItems(org, project);
       const matched = where ? items.filter((i) => i.fields[where.field] === where.value) : items;
       console.log(`Would clear '${field}' on ${matched.length}/${items.length} items`);
       for (const m of matched.slice(0, 20)) {
@@ -34,7 +34,7 @@ export const itemFieldClearCommand = defineCommand({
       return;
     }
 
-    const result = bulkClearField(org, project, field, where);
+    const result = await bulkClearField(org, project, field, where);
     console.log(`✓ Cleared '${field}' on ${result.applied}/${result.matched} matched items (total: ${result.total})`);
   },
 });

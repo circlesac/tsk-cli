@@ -27,7 +27,7 @@ export const itemArchiveCommand = defineCommand({
     const project = Number(args.project);
 
     if (args["dry-run"]) {
-      const items = listProjectItems(org, project);
+      const items = await listProjectItems(org, project);
       const matched = where ? items.filter((i) => i.fields[where.field] === where.value) : items;
       console.log(`Would archive ${matched.length}/${items.length} items`);
       for (const m of matched.slice(0, 20)) console.log(`  #${m.contentNumber}  ${m.contentTitle}`);
@@ -35,7 +35,7 @@ export const itemArchiveCommand = defineCommand({
       return;
     }
 
-    const result = bulkArchive(org, project, where);
+    const result = await bulkArchive(org, project, where);
     console.log(`✓ Archived ${result.applied}/${result.matched} matched (total active: ${result.total})`);
   },
 });
@@ -61,7 +61,7 @@ export const itemUnarchiveCommand = defineCommand({
       console.error("Find IDs at https://github.com/orgs/<org>/projects/<n>/views/1?filterQuery=is%3Aarchived");
       process.exit(1);
     }
-    const result = bulkUnarchive(String(args.org), Number(args.project), ids);
+    const result = await bulkUnarchive(String(args.org), Number(args.project), ids);
     console.log(`✓ Unarchived ${result.applied}/${ids.length} items`);
   },
 });

@@ -9,7 +9,7 @@ export const itemListCommand = defineCommand({
     json: { type: "boolean", description: "Output as JSON", default: false },
   },
   async run({ args }) {
-    const items = listProjectItems(String(args.org), Number(args.project));
+    const items = await listProjectItems(String(args.org), Number(args.project));
     if (args.json) {
       console.log(JSON.stringify(items, null, 2));
       return;
