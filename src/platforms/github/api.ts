@@ -986,3 +986,81 @@ export function deleteStatusUpdate(statusUpdateId: string): void {
     `mutation { deleteProjectV2StatusUpdate(input: {statusUpdateId: "${statusUpdateId}"}) { clientMutationId } }`,
   );
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Workflows & Charts (discovered via Playwright on web UI)
+//
+// Endpoints found:
+//   GET  /memexes/<id>/workflows           — list all workflows ✅
+//   GET  /memexes/<id>/charts              — list charts ✅
+//   GET  /memexes/<id>/charts/query?...    — fetch chart data ✅
+//   ?    /memexes/<id>/workflows/<n>       — PATCH/PUT shape TBD (returns 422 without right body)
+//   ?    /memexes/<id>/charts              — POST shape TBD (returns 400 without right body)
+//
+// Body shapes for write ops require driving the web UI to toggle/create and
+// capture exact payloads. Currently read-only here.
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface Workflow {
+  id: number;
+  name: string;
+  number: number;
+  triggerType: string;
+  contentTypes: string[];
+  enabled: boolean;
+  actions: Array<{ id: number; actionType: string; arguments: Record<string, unknown> }>;
+}
+
+export async function listWorkflows(
+  creds: GitHubCookies,
+  org: string,
+  projectNumber: number,
+): Promise<Workflow[]> {
+  const { projectId, page } = await resolveProject(creds, org, projectNumber);
+  const url = `${GITHUB}/memexes/${projectId}/workflows`;
+  const resp = await fetch(url, {
+    headers: {
+      Cookie: buildCookieHeader(creds, page.ghSess),
+      Accept: "application/json",
+      "github-verified-fetch": "true",
+      "x-requested-with": "XMLHttpRequest",
+      "x-fetch-nonce": page.nonce,
+      "User-Agent": "tsk-cli",
+    },
+  });
+  if (resp.status !== 200) {
+    throw new Error(`workflow list failed (HTTP ${resp.status})`);
+  }
+  const data = (await resp.json()) as { workflows: Workflow[] };
+  return data.workflows ?? [];
+}
+
+export interface Chart {
+  // Shape TBD — empty when no charts exist
+  [key: string]: unknown;
+}
+
+export async function listCharts(
+  creds: GitHubCookies,
+  org: string,
+  projectNumber: number,
+): Promise<Chart[]> {
+  const { projectId, page } = await resolveProject(creds, org, projectNumber);
+  const url = `${GITHUB}/memexes/${projectId}/charts`;
+  const resp = await fetch(url, {
+    headers: {
+      Cookie: buildCookieHeader(creds, page.ghSess),
+      Accept: "application/json",
+      "github-verified-fetch": "true",
+      "x-requested-with": "XMLHttpRequest",
+      "x-fetch-nonce": page.nonce,
+      "User-Agent": "tsk-cli",
+    },
+  });
+  if (resp.status !== 200) {
+    throw new Error(`chart list failed (HTTP ${resp.status})`);
+  }
+  const data = (await resp.json()) as { charts: Chart[] };
+  return data.charts ?? [];
+}
+
