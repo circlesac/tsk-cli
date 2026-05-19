@@ -41,13 +41,27 @@ export const itemArchiveCommand = defineCommand({
 });
 
 export const itemUnarchiveCommand = defineCommand({
-  meta: { name: "unarchive", description: "Unarchive all archived items in the project" },
+  meta: {
+    name: "unarchive",
+    description:
+      "Unarchive items by node ID (GraphQL items() can't list archived items, so pass IDs explicitly)",
+  },
   args: {
     org: { type: "positional", description: "Org login", required: true },
     project: { type: "positional", description: "Project number", required: true },
+    "item-ids": {
+      type: "string",
+      description: "Comma-separated item node IDs (PVTI_...) — get from web UI archived view URL",
+    },
   },
   async run({ args }) {
-    const result = bulkUnarchive(String(args.org), Number(args.project), null);
-    console.log(`✓ Unarchived ${result.applied}/${result.matched} archived items (total in project: ${result.total})`);
+    const ids = args["item-ids"] ? String(args["item-ids"]).split(",").map((s) => s.trim()).filter(Boolean) : [];
+    if (ids.length === 0) {
+      console.error("Specify --item-ids 'PVTI_xxx,PVTI_yyy,...' — GitHub GraphQL items() doesn't list archived items.");
+      console.error("Find IDs at https://github.com/orgs/<org>/projects/<n>/views/1?filterQuery=is%3Aarchived");
+      process.exit(1);
+    }
+    const result = bulkUnarchive(String(args.org), Number(args.project), ids);
+    console.log(`✓ Unarchived ${result.applied}/${ids.length} items`);
   },
 });

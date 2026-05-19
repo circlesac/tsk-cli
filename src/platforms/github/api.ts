@@ -845,37 +845,28 @@ export function bulkArchive(
   return { applied, total: items.length, matched: matched.length };
 }
 
+/**
+ * Unarchive items by explicit node IDs.
+ *
+ * Note: GraphQL projectV2.items() doesn't expose archived items — neither via
+ * a query filter nor via a separate connection. To find archived item IDs,
+ * use the web UI's archived view (filterQuery=is:archived) URL or capture via
+ * the page HTML. Callers must pass IDs.
+ */
 export function bulkUnarchive(
   org: string,
   projectNumber: number,
-  where: { field: string; value: string } | null,
-): { applied: number; total: number; matched: number } {
+  itemNodeIds: string[],
+): { applied: number } {
   const projectNodeId = getProjectId(org, projectNumber);
-  // For unarchive we need to fetch archived items separately
-  type Resp = {
-    owner?: { projectV2?: {
-        items?: { nodes?: Array<{ id: string; content: { number?: number; title?: string } | null }> };
-      };
-    };
-  };
-  // archived: filterBy doesn't exist as input — we just list all items including archived
-  const data = ghGraphQL<Resp>(
-    `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { items(first:100) { nodes { id isArchived content { ... on Issue { number title } ... on PullRequest { number title } ... on DraftIssue { title } } } } } } }`.replace("nodes { id isArchived", "nodes { id isArchived"),
-  );
-  const all = (data.owner?.projectV2?.items?.nodes ?? []) as Array<{ id: string; isArchived?: boolean; content: { number?: number; title?: string } | null }>;
-  // For unarchive, we just operate on all archived items (no field-based where since archived items don't appear in the standard listProjectItems)
-  const candidates = all.filter((i) => i.isArchived);
   let applied = 0;
-  for (const i of candidates) {
-    if (where) {
-      // We don't have field values for archived items in this query — skip --where for unarchive
-    }
+  for (const id of itemNodeIds) {
     ghGraphQL<{ unarchiveProjectV2Item?: unknown }>(
-      `mutation { unarchiveProjectV2Item(input: {projectId: "${projectNodeId}", itemId: "${i.id}"}) { item { id } } }`,
+      `mutation { unarchiveProjectV2Item(input: {projectId: "${projectNodeId}", itemId: "${id}"}) { item { id } } }`,
     );
     applied++;
   }
-  return { applied, total: all.length, matched: candidates.length };
+  return { applied };
 }
 
 export function moveItem(
