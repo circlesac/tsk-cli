@@ -1064,3 +1064,157 @@ export async function listCharts(
   return data.charts ?? [];
 }
 
+// ── workflow write ops (PUT same /workflows root with workflowNumber in body) ──
+
+async function memexWorkflowCall(
+  creds: GitHubCookies,
+  projectId: number,
+  method: "POST" | "PUT" | "DELETE",
+  body: unknown,
+  page: PageState,
+): Promise<{ status: number; data: unknown }> {
+  const url = `${GITHUB}/memexes/${projectId}/workflows`;
+  const resp = await fetch(url, {
+    method,
+    headers: {
+      Accept: "application/json", "Content-Type": "application/json",
+      "github-verified-fetch": "true", "x-requested-with": "XMLHttpRequest",
+      "x-fetch-nonce": page.nonce, Cookie: buildCookieHeader(creds, page.ghSess),
+      "User-Agent": "tsk-cli", Origin: GITHUB,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data: unknown = null;
+  const text = await resp.text();
+  if (text) {
+    try { data = JSON.parse(text); } catch { data = text.slice(0, 500); }
+  }
+  if (resp.status >= 400) {
+    const msg = typeof data === "string" ? data.slice(0, 200) : JSON.stringify(data).slice(0, 200);
+    throw new Error(`workflow API ${method} failed (HTTP ${resp.status}). ${msg}`);
+  }
+  return { status: resp.status, data };
+}
+
+export async function toggleWorkflow(
+  creds: GitHubCookies,
+  org: string,
+  projectNumber: number,
+  workflowNumber: number,
+  enabled: boolean,
+): Promise<Workflow> {
+  const { projectId, page } = await resolveProject(creds, org, projectNumber);
+  // First fetch current state of all workflows
+  const all = await listWorkflows(creds, org, projectNumber);
+  const wf = all.find((w) => w.number === workflowNumber);
+  if (!wf) throw new Error(`Workflow #${workflowNumber} not found`);
+  const body = {
+    workflowNumber: wf.number,
+    name: wf.name,
+    contentTypes: wf.contentTypes,
+    enabled,
+    actions: wf.actions,
+  };
+  const result = await memexWorkflowCall(creds, projectId, "PUT", body, page);
+  return (result.data as { workflow: Workflow }).workflow ?? wf;
+}
+
+export async function updateWorkflow(
+  creds: GitHubCookies,
+  org: string,
+  projectNumber: number,
+  workflowNumber: number,
+  changes: { name?: string; enabled?: boolean; contentTypes?: string[]; actions?: Workflow["actions"] },
+): Promise<Workflow> {
+  const { projectId, page } = await resolveProject(creds, org, projectNumber);
+  const all = await listWorkflows(creds, org, projectNumber);
+  const wf = all.find((w) => w.number === workflowNumber);
+  if (!wf) throw new Error(`Workflow #${workflowNumber} not found`);
+  const body = {
+    workflowNumber: wf.number,
+    name: changes.name ?? wf.name,
+    contentTypes: changes.contentTypes ?? wf.contentTypes,
+    enabled: changes.enabled ?? wf.enabled,
+    actions: changes.actions ?? wf.actions,
+  };
+  const result = await memexWorkflowCall(creds, projectId, "PUT", body, page);
+  return (result.data as { workflow: Workflow }).workflow ?? wf;
+}
+
+// ── chart CRUD ──
+
+export interface ChartConfiguration {
+  filter?: string;
+  type?: "column" | "line" | "bar";
+  xAxis?: { dataSource: { column: number | string } };
+  yAxis?: { aggregate: { operation: "count" | string } };
+  time?: { period: string };
+}
+
+export interface ChartFull {
+  name: string;
+  number: number;
+  configuration: ChartConfiguration;
+}
+
+async function memexChartCall(
+  creds: GitHubCookies,
+  projectId: number,
+  method: "POST" | "PUT" | "DELETE",
+  body: unknown,
+  page: PageState,
+): Promise<{ status: number; data: unknown }> {
+  const url = `${GITHUB}/memexes/${projectId}/charts`;
+  const resp = await fetch(url, {
+    method,
+    headers: {
+      Accept: "application/json", "Content-Type": "application/json",
+      "github-verified-fetch": "true", "x-requested-with": "XMLHttpRequest",
+      "x-fetch-nonce": page.nonce, Cookie: buildCookieHeader(creds, page.ghSess),
+      "User-Agent": "tsk-cli", Origin: GITHUB,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data: unknown = null;
+  const text = await resp.text();
+  if (text) { try { data = JSON.parse(text); } catch { data = text.slice(0, 500); } }
+  if (resp.status >= 400) {
+    const msg = typeof data === "string" ? data.slice(0, 200) : JSON.stringify(data).slice(0, 200);
+    throw new Error(`chart API ${method} failed (HTTP ${resp.status}). ${msg}`);
+  }
+  return { status: resp.status, data };
+}
+
+export async function createChart(
+  creds: GitHubCookies,
+  org: string,
+  projectNumber: number,
+  config: ChartConfiguration,
+): Promise<ChartFull> {
+  const { projectId, page } = await resolveProject(creds, org, projectNumber);
+  const result = await memexChartCall(creds, projectId, "POST", { chart: { configuration: config } }, page);
+  return (result.data as { chart: ChartFull }).chart;
+}
+
+export async function updateChart(
+  creds: GitHubCookies,
+  org: string,
+  projectNumber: number,
+  chartNumber: number,
+  changes: { name?: string; configuration?: ChartConfiguration },
+): Promise<ChartFull> {
+  const { projectId, page } = await resolveProject(creds, org, projectNumber);
+  const result = await memexChartCall(creds, projectId, "PUT", { chartNumber, chart: changes }, page);
+  return (result.data as { chart: ChartFull }).chart;
+}
+
+export async function deleteChart(
+  creds: GitHubCookies,
+  org: string,
+  projectNumber: number,
+  chartNumber: number,
+): Promise<void> {
+  const { projectId, page } = await resolveProject(creds, org, projectNumber);
+  await memexChartCall(creds, projectId, "DELETE", { chartNumber }, page);
+}
+
