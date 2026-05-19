@@ -1,6 +1,6 @@
 import { defineCommand } from "citty";
 import { requireCookies } from "../../../credentials.js";
-import { updateView, getViewState } from "../../../api.js";
+import { updateView, getViewStateFull } from "../../../api.js";
 import type { ViewConfig, ViewLayout } from "../../../types.js";
 
 const LAYOUT_MAP: Record<string, ViewLayout> = {
@@ -29,7 +29,10 @@ function parseSortBy(v: string | undefined): [number, "asc" | "desc"][] | undefi
 }
 
 export const viewUpdateCommand = defineCommand({
-  meta: { name: "update", description: "Update an existing view (rename · filter · group · sort · slice · layout)" },
+  meta: {
+    name: "update",
+    description: "Update view — preserves existing groupBy/sortBy/verticalGroupBy/visibleFields if not specified",
+  },
   args: {
     org: { type: "positional", description: "Org login", required: true },
     project: { type: "positional", description: "Project number", required: true },
@@ -37,11 +40,11 @@ export const viewUpdateCommand = defineCommand({
     name: { type: "string", description: "New view name" },
     layout: { type: "string", description: "Layout: table | board | roadmap" },
     filter: { type: "string", description: "Filter query (e.g. 'type:Epic')" },
-    "group-by": { type: "string", description: "Group-by field IDs, comma-separated" },
-    "vertical-group-by": { type: "string", description: "Board column-by field IDs" },
-    "sort-by": { type: "string", description: "Sort: '<fieldId>:asc,<fieldId>:desc'" },
-    "visible-fields": { type: "string", description: "Visible field IDs, comma-separated" },
-    "slice-field": { type: "string", description: "Slice-by field ID" },
+    "group-by": { type: "string", description: "Replace group-by field IDs (comma-sep). Empty string clears." },
+    "vertical-group-by": { type: "string", description: "Replace Board column-by field IDs" },
+    "sort-by": { type: "string", description: "Replace sort: '<fieldId>:asc,<fieldId>:desc'" },
+    "visible-fields": { type: "string", description: "Replace visible field IDs" },
+    "slice-field": { type: "string", description: "Slice-by field ID (Board sidebar slicer)" },
     json: { type: "boolean", description: "Output as JSON", default: false },
   },
   async run({ args }) {
@@ -50,7 +53,7 @@ export const viewUpdateCommand = defineCommand({
     const project = Number(args.project);
     const viewNum = Number(args.view);
 
-    const existing = getViewState(org, project, viewNum);
+    const existing = getViewStateFull(org, project, viewNum);
 
     const incomingLayout = args.layout
       ? (LAYOUT_MAP[String(args.layout).toLowerCase()] ?? LAYOUT_MAP[String(args.layout)])
@@ -60,11 +63,17 @@ export const viewUpdateCommand = defineCommand({
     const view: ViewConfig = {
       name: args.name ?? existing.name,
       layout: incomingLayout ?? existingLayout ?? "table_layout",
-      filter: args.filter ?? existing.filter ?? "",
-      groupBy: parseIntList(args["group-by"]) ?? [],
-      verticalGroupBy: parseIntList(args["vertical-group-by"]) ?? [],
-      sortBy: parseSortBy(args["sort-by"]) ?? [],
-      visibleFields: parseIntList(args["visible-fields"]) ?? [],
+      filter: args.filter ?? existing.filter,
+      // For list-shaped fields: parse new value if user passed it (even empty string),
+      // otherwise preserve existing.
+      groupBy: args["group-by"] !== undefined ? (parseIntList(String(args["group-by"])) ?? []) : existing.groupBy,
+      verticalGroupBy: args["vertical-group-by"] !== undefined
+        ? (parseIntList(String(args["vertical-group-by"])) ?? [])
+        : existing.verticalGroupBy,
+      sortBy: args["sort-by"] !== undefined ? (parseSortBy(String(args["sort-by"])) ?? []) : existing.sortBy,
+      visibleFields: args["visible-fields"] !== undefined
+        ? (parseIntList(String(args["visible-fields"])) ?? [])
+        : existing.visibleFields,
     };
     if (args["slice-field"]) {
       view.sliceBy = { field: Number(args["slice-field"]), filter: "" };

@@ -1,5 +1,5 @@
 import { defineCommand } from "citty";
-import { bulkSetSingleSelect } from "../../../api.js";
+import { bulkSetField } from "../../../api.js";
 
 function parseWhere(s: string | undefined): { field: string; value: string } | null {
   if (!s) return null;
@@ -11,17 +11,19 @@ function parseWhere(s: string | undefined): { field: string; value: string } | n
 export const itemFieldSetCommand = defineCommand({
   meta: {
     name: "field-set",
-    description: "Bulk set a single-select field value on items matching --where filter",
+    description:
+      "Bulk set a field value (single-select / text / number / date) on items matching --where",
   },
   args: {
     org: { type: "positional", description: "Org login", required: true },
     project: { type: "positional", description: "Project number", required: true },
-    field: { type: "string", description: "Field name to set", required: true },
-    value: { type: "string", description: "Option name to assign", required: true },
-    where: {
+    field: { type: "string", description: "Field name", required: true },
+    value: {
       type: "string",
-      description: "Filter (e.g. '단계=사전검토'). Omit to target all items.",
+      description: "Value to assign — option name (single-select), text, number, or YYYY-MM-DD (date)",
+      required: true,
     },
+    where: { type: "string", description: "Filter 'FieldName=Value'. Omit to target all items." },
     "dry-run": { type: "boolean", description: "Show what would change without applying", default: false },
   },
   async run({ args }) {
@@ -43,9 +45,9 @@ export const itemFieldSetCommand = defineCommand({
       return;
     }
 
-    const result = bulkSetSingleSelect(org, project, field, value, where);
+    const result = bulkSetField(org, project, field, value, where);
     console.log(
-      `✓ Set ${field}=${value} on ${result.applied}/${result.matched} matched items (total project items: ${result.total})`,
+      `✓ Set ${field}=${value} (${result.valueType}) on ${result.applied}/${result.matched} matched items (total: ${result.total})`,
     );
   },
 });

@@ -140,28 +140,67 @@ async function resolveProject(
 /**
  * Internal helper — fetch current view state so `update` can preserve fields
  * the user didn't override (PUT is full replacement, not patch).
+ *
+ * Returns groupBy/sortBy/verticalGroupBy/visibleFields with **integer field IDs**
+ * (databaseId), ready to round-trip through /memexes/ PUT.
+ *
+ * Caveat: sliceBy / layoutSettings / aggregationSettings are not exposed via
+ * GraphQL read; callers must re-specify if they want to preserve those.
  */
-export function getViewState(
+export interface ViewStateFull {
+  number: number;
+  name: string;
+  layout: string;
+  filter: string;
+  groupBy: number[];
+  sortBy: [number, "asc" | "desc"][];
+  verticalGroupBy: number[];
+  visibleFields: number[];
+}
+
+export function getViewStateFull(
   org: string,
   projectNumber: number,
   viewNumber: number,
-): { number: number; name: string; layout: string; filter: string | null } {
-  type Resp = {
-    organization?: {
-      projectV2?: {
-        views?: { nodes?: Array<{ number: number; name: string; layout: string; filter: string | null }> };
-      };
-    };
+): ViewStateFull {
+  type Node = {
+    number: number;
+    name: string;
+    layout: string;
+    filter: string | null;
+    groupByFields?: { nodes?: Array<{ databaseId: number }> };
+    sortByFields?: { nodes?: Array<{ direction: "ASC" | "DESC"; field: { databaseId: number } }> };
+    verticalGroupByFields?: { nodes?: Array<{ databaseId: number }> };
+    fields?: { nodes?: Array<{ databaseId: number }> };
   };
+  type Resp = { organization?: { projectV2?: { views?: { nodes?: Node[] } } } };
   const data = ghGraphQL<Resp>(
-    `query { organization(login:"${org}") { projectV2(number:${projectNumber}) { views(first:50) { nodes { number name layout filter } } } } }`,
+    `query { organization(login:"${org}") { projectV2(number:${projectNumber}) { views(first:50) { nodes { number name layout filter groupByFields(first:10) { nodes { ... on ProjectV2FieldCommon { databaseId } } } sortByFields(first:10) { nodes { direction field { ... on ProjectV2FieldCommon { databaseId } } } } verticalGroupByFields(first:10) { nodes { ... on ProjectV2FieldCommon { databaseId } } } fields(first:50) { nodes { ... on ProjectV2FieldCommon { databaseId } } } } } } } }`,
   );
   const views = data.organization?.projectV2?.views?.nodes ?? [];
   const found = views.find((v) => v.number === viewNumber);
   if (!found) {
     throw new Error(`View #${viewNumber} not found in ${org}/projects/${projectNumber}`);
   }
-  return found;
+  return {
+    number: found.number,
+    name: found.name,
+    layout: found.layout,
+    filter: found.filter ?? "",
+    groupBy: (found.groupByFields?.nodes ?? []).map((n) => n.databaseId),
+    verticalGroupBy: (found.verticalGroupByFields?.nodes ?? []).map((n) => n.databaseId),
+    sortBy: (found.sortByFields?.nodes ?? []).map((n) => [n.field.databaseId, n.direction.toLowerCase() as "asc" | "desc"]),
+    visibleFields: (found.fields?.nodes ?? []).map((n) => n.databaseId),
+  };
+}
+
+// Back-compat shim
+export function getViewState(
+  org: string,
+  projectNumber: number,
+  viewNumber: number,
+): { number: number; name: string; layout: string; filter: string | null } {
+  return getViewStateFull(org, projectNumber, viewNumber);
 }
 
 export async function createView(
@@ -583,8 +622,6 @@ export function setItemSingleSelect(
 
 /**
  * Bulk set a single-select field value on items matching --where filter.
- * --where syntax: "FieldName=Value" (single condition).
- * Returns counts of applied/skipped.
  */
 export function bulkSetSingleSelect(
   org: string,
@@ -616,4 +653,336 @@ export function bulkSetSingleSelect(
     applied++;
   }
   return { applied, total: items.length, matched: matched.length };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Field option bulk recolor
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Update colors of multiple options on a single-select field in one call.
+ * Options not in the map keep their current color.
+ */
+export function recolorOptions(
+  org: string,
+  projectNumber: number,
+  fieldName: string,
+  colorMap: Record<string, Color>,
+): { changed: number; skipped: string[] } {
+  const field = findProjectField(org, projectNumber, fieldName);
+  if (!field.options) throw new Error(`Field '${fieldName}' is not single-select`);
+  const skipped: string[] = [];
+  let changed = 0;
+  const next = field.options.map((o) => {
+    const newColor = colorMap[o.name];
+    if (newColor && newColor !== o.color) {
+      changed++;
+      return { id: o.id, name: o.name, color: newColor, description: o.description ?? "" };
+    }
+    return { id: o.id, name: o.name, color: o.color, description: o.description ?? "" };
+  });
+  // Track unknown option names from the map
+  for (const name of Object.keys(colorMap)) {
+    if (!field.options.some((o) => o.name === name)) skipped.push(name);
+  }
+  if (changed > 0) setFieldOptions(org, projectNumber, fieldName, next);
+  return { changed, skipped };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Item bulk operations: field-set extended types, field-clear, archive, move
+// ────────────────────────────────────────────────────────────────────────────
+
+export type FieldValueInput =
+  | { type: "singleSelect"; optionId: string }
+  | { type: "text"; text: string }
+  | { type: "number"; number: number }
+  | { type: "date"; date: string }     // YYYY-MM-DD
+  | { type: "iteration"; iterationId: string };
+
+function setItemFieldValue(
+  projectNodeId: string,
+  itemId: string,
+  fieldId: string,
+  value: FieldValueInput,
+): void {
+  let valLiteral: string;
+  switch (value.type) {
+    case "singleSelect": valLiteral = `{singleSelectOptionId: "${value.optionId}"}`; break;
+    case "text":         valLiteral = `{text: ${JSON.stringify(value.text)}}`; break;
+    case "number":       valLiteral = `{number: ${value.number}}`; break;
+    case "date":         valLiteral = `{date: "${value.date}"}`; break;
+    case "iteration":    valLiteral = `{iterationId: "${value.iterationId}"}`; break;
+  }
+  ghGraphQL<{ updateProjectV2ItemFieldValue?: unknown }>(
+    `mutation { updateProjectV2ItemFieldValue(input: {projectId: "${projectNodeId}", itemId: "${itemId}", fieldId: "${fieldId}", value: ${valLiteral}}) { projectV2Item { id } } }`,
+  );
+}
+
+/**
+ * Bulk set any-typed field value. For single-select pass option name as value.
+ * For text/number/date, pass the raw value.
+ */
+export function bulkSetField(
+  org: string,
+  projectNumber: number,
+  fieldName: string,
+  rawValue: string,
+  where: { field: string; value: string } | null,
+): { applied: number; total: number; matched: number; valueType: string } {
+  const projectNodeId = getProjectId(org, projectNumber);
+  const field = findProjectField(org, projectNumber, fieldName);
+
+  let value: FieldValueInput;
+  let valueType: string;
+  if (field.dataType === "SINGLE_SELECT") {
+    if (!field.options) throw new Error(`Field '${fieldName}' missing options`);
+    const opt = field.options.find((o) => o.name === rawValue);
+    if (!opt) {
+      throw new Error(
+        `Option '${rawValue}' not found on '${fieldName}'. Available: ${field.options.map((o) => o.name).join(", ")}`,
+      );
+    }
+    value = { type: "singleSelect", optionId: opt.id };
+    valueType = "single-select";
+  } else if (field.dataType === "TEXT") {
+    value = { type: "text", text: rawValue };
+    valueType = "text";
+  } else if (field.dataType === "NUMBER") {
+    const n = Number(rawValue);
+    if (Number.isNaN(n)) throw new Error(`Field '${fieldName}' is NUMBER but value '${rawValue}' isn't numeric`);
+    value = { type: "number", number: n };
+    valueType = "number";
+  } else if (field.dataType === "DATE") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) {
+      throw new Error(`Field '${fieldName}' is DATE; expected YYYY-MM-DD, got '${rawValue}'`);
+    }
+    value = { type: "date", date: rawValue };
+    valueType = "date";
+  } else {
+    throw new Error(`Unsupported field dataType: ${field.dataType}. Use single-select, text, number, or date fields.`);
+  }
+
+  const items = listProjectItems(org, projectNumber);
+  const matched = where ? items.filter((i) => i.fields[where.field] === where.value) : items;
+
+  let applied = 0;
+  for (const i of matched) {
+    setItemFieldValue(projectNodeId, i.itemId, field.id, value);
+    applied++;
+  }
+  return { applied, total: items.length, matched: matched.length, valueType };
+}
+
+/**
+ * Bulk clear a field value (returns it to unset).
+ */
+export function bulkClearField(
+  org: string,
+  projectNumber: number,
+  fieldName: string,
+  where: { field: string; value: string } | null,
+): { applied: number; total: number; matched: number } {
+  const projectNodeId = getProjectId(org, projectNumber);
+  const field = findProjectField(org, projectNumber, fieldName);
+
+  const items = listProjectItems(org, projectNumber);
+  const matched = where ? items.filter((i) => i.fields[where.field] === where.value) : items;
+
+  let applied = 0;
+  for (const i of matched) {
+    ghGraphQL<{ clearProjectV2ItemFieldValue?: unknown }>(
+      `mutation { clearProjectV2ItemFieldValue(input: {projectId: "${projectNodeId}", itemId: "${i.itemId}", fieldId: "${field.id}"}) { projectV2Item { id } } }`,
+    );
+    applied++;
+  }
+  return { applied, total: items.length, matched: matched.length };
+}
+
+export function bulkArchive(
+  org: string,
+  projectNumber: number,
+  where: { field: string; value: string } | null,
+): { applied: number; total: number; matched: number } {
+  const projectNodeId = getProjectId(org, projectNumber);
+  const items = listProjectItems(org, projectNumber);
+  const matched = where ? items.filter((i) => i.fields[where.field] === where.value) : items;
+  let applied = 0;
+  for (const i of matched) {
+    ghGraphQL<{ archiveProjectV2Item?: unknown }>(
+      `mutation { archiveProjectV2Item(input: {projectId: "${projectNodeId}", itemId: "${i.itemId}"}) { item { id } } }`,
+    );
+    applied++;
+  }
+  return { applied, total: items.length, matched: matched.length };
+}
+
+export function bulkUnarchive(
+  org: string,
+  projectNumber: number,
+  where: { field: string; value: string } | null,
+): { applied: number; total: number; matched: number } {
+  const projectNodeId = getProjectId(org, projectNumber);
+  // For unarchive we need to fetch archived items separately
+  type Resp = {
+    organization?: {
+      projectV2?: {
+        items?: { nodes?: Array<{ id: string; content: { number?: number; title?: string } | null }> };
+      };
+    };
+  };
+  // archived: filterBy doesn't exist as input — we just list all items including archived
+  const data = ghGraphQL<Resp>(
+    `query { organization(login:"${org}") { projectV2(number:${projectNumber}) { items(first:100) { nodes { id isArchived content { ... on Issue { number title } ... on PullRequest { number title } ... on DraftIssue { title } } } } } } }`.replace("nodes { id isArchived", "nodes { id isArchived"),
+  );
+  const all = (data.organization?.projectV2?.items?.nodes ?? []) as Array<{ id: string; isArchived?: boolean; content: { number?: number; title?: string } | null }>;
+  // For unarchive, we just operate on all archived items (no field-based where since archived items don't appear in the standard listProjectItems)
+  const candidates = all.filter((i) => i.isArchived);
+  let applied = 0;
+  for (const i of candidates) {
+    if (where) {
+      // We don't have field values for archived items in this query — skip --where for unarchive
+    }
+    ghGraphQL<{ unarchiveProjectV2Item?: unknown }>(
+      `mutation { unarchiveProjectV2Item(input: {projectId: "${projectNodeId}", itemId: "${i.id}"}) { item { id } } }`,
+    );
+    applied++;
+  }
+  return { applied, total: all.length, matched: candidates.length };
+}
+
+export function moveItem(
+  projectNodeId: string,
+  itemId: string,
+  afterItemId: string | null,
+): void {
+  const afterClause = afterItemId ? `, afterId: "${afterItemId}"` : "";
+  ghGraphQL<{ updateProjectV2ItemPosition?: unknown }>(
+    `mutation { updateProjectV2ItemPosition(input: {projectId: "${projectNodeId}", itemId: "${itemId}"${afterClause}}) { items(first:1) { nodes { id } } } }`,
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Field create (extended types)
+// ────────────────────────────────────────────────────────────────────────────
+
+export function createTextField(org: string, projectNumber: number, name: string): { id: string; databaseId: number } {
+  const projectId = getProjectId(org, projectNumber);
+  type Resp = { createProjectV2Field?: { projectV2Field: { id: string; databaseId: number } } };
+  const data = ghGraphQL<Resp>(
+    `mutation { createProjectV2Field(input: {projectId: "${projectId}", dataType: TEXT, name: "${name}"}) { projectV2Field { ... on ProjectV2FieldCommon { id databaseId } } } }`,
+  );
+  if (!data.createProjectV2Field?.projectV2Field) throw new Error("createProjectV2Field returned no field");
+  return data.createProjectV2Field.projectV2Field;
+}
+
+export function createNumberField(org: string, projectNumber: number, name: string): { id: string; databaseId: number } {
+  const projectId = getProjectId(org, projectNumber);
+  type Resp = { createProjectV2Field?: { projectV2Field: { id: string; databaseId: number } } };
+  const data = ghGraphQL<Resp>(
+    `mutation { createProjectV2Field(input: {projectId: "${projectId}", dataType: NUMBER, name: "${name}"}) { projectV2Field { ... on ProjectV2FieldCommon { id databaseId } } } }`,
+  );
+  if (!data.createProjectV2Field?.projectV2Field) throw new Error("createProjectV2Field returned no field");
+  return data.createProjectV2Field.projectV2Field;
+}
+
+export function createDateField(org: string, projectNumber: number, name: string): { id: string; databaseId: number } {
+  const projectId = getProjectId(org, projectNumber);
+  type Resp = { createProjectV2Field?: { projectV2Field: { id: string; databaseId: number } } };
+  const data = ghGraphQL<Resp>(
+    `mutation { createProjectV2Field(input: {projectId: "${projectId}", dataType: DATE, name: "${name}"}) { projectV2Field { ... on ProjectV2FieldCommon { id databaseId } } } }`,
+  );
+  if (!data.createProjectV2Field?.projectV2Field) throw new Error("createProjectV2Field returned no field");
+  return data.createProjectV2Field.projectV2Field;
+}
+
+/**
+ * Iteration field — needs startDate + duration. iterations array auto-populated by GitHub.
+ */
+export function createIterationField(
+  org: string,
+  projectNumber: number,
+  name: string,
+  startDate: string,
+  duration: number,
+): { id: string; databaseId: number } {
+  const projectId = getProjectId(org, projectNumber);
+  type Resp = { createProjectV2Field?: { projectV2Field: { id: string; databaseId: number } } };
+  const data = ghGraphQL<Resp>(
+    `mutation { createProjectV2Field(input: {projectId: "${projectId}", dataType: ITERATION, name: "${name}", iterationConfiguration: {startDate: "${startDate}", duration: ${duration}, iterations: []}}) { projectV2Field { ... on ProjectV2FieldCommon { id databaseId } } } }`,
+  );
+  if (!data.createProjectV2Field?.projectV2Field) throw new Error("createProjectV2Field returned no field");
+  return data.createProjectV2Field.projectV2Field;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Project Status Updates
+// ────────────────────────────────────────────────────────────────────────────
+
+export type StatusUpdateStatus = "INACTIVE" | "ON_TRACK" | "AT_RISK" | "OFF_TRACK" | "COMPLETE";
+
+export interface StatusUpdate {
+  id: string;
+  fullDatabaseId: number;
+  body: string;
+  status: StatusUpdateStatus | null;
+  startDate: string | null;
+  targetDate: string | null;
+  createdAt: string;
+}
+
+export function listStatusUpdates(org: string, projectNumber: number): StatusUpdate[] {
+  type Resp = {
+    organization?: {
+      projectV2?: {
+        statusUpdates?: { nodes?: StatusUpdate[] };
+      };
+    };
+  };
+  const data = ghGraphQL<Resp>(
+    `query { organization(login:"${org}") { projectV2(number:${projectNumber}) { statusUpdates(first:50) { nodes { id fullDatabaseId body status startDate targetDate createdAt } } } } }`,
+  );
+  return data.organization?.projectV2?.statusUpdates?.nodes ?? [];
+}
+
+export function createStatusUpdate(
+  org: string,
+  projectNumber: number,
+  body: string,
+  opts: { status?: StatusUpdateStatus; startDate?: string; targetDate?: string } = {},
+): StatusUpdate {
+  const projectId = getProjectId(org, projectNumber);
+  const parts: string[] = [`projectId: "${projectId}"`, `body: ${JSON.stringify(body)}`];
+  if (opts.status) parts.push(`status: ${opts.status}`);
+  if (opts.startDate) parts.push(`startDate: "${opts.startDate}"`);
+  if (opts.targetDate) parts.push(`targetDate: "${opts.targetDate}"`);
+  type Resp = { createProjectV2StatusUpdate?: { statusUpdate: StatusUpdate } };
+  const data = ghGraphQL<Resp>(
+    `mutation { createProjectV2StatusUpdate(input: {${parts.join(", ")}}) { statusUpdate { id fullDatabaseId body status startDate targetDate createdAt } } }`,
+  );
+  if (!data.createProjectV2StatusUpdate?.statusUpdate) throw new Error("createProjectV2StatusUpdate returned no update");
+  return data.createProjectV2StatusUpdate.statusUpdate;
+}
+
+export function updateStatusUpdate(
+  statusUpdateId: string,
+  changes: { body?: string; status?: StatusUpdateStatus; startDate?: string; targetDate?: string },
+): StatusUpdate {
+  const parts: string[] = [`statusUpdateId: "${statusUpdateId}"`];
+  if (changes.body !== undefined) parts.push(`body: ${JSON.stringify(changes.body)}`);
+  if (changes.status !== undefined) parts.push(`status: ${changes.status}`);
+  if (changes.startDate !== undefined) parts.push(`startDate: "${changes.startDate}"`);
+  if (changes.targetDate !== undefined) parts.push(`targetDate: "${changes.targetDate}"`);
+  type Resp = { updateProjectV2StatusUpdate?: { statusUpdate: StatusUpdate } };
+  const data = ghGraphQL<Resp>(
+    `mutation { updateProjectV2StatusUpdate(input: {${parts.join(", ")}}) { statusUpdate { id fullDatabaseId body status startDate targetDate createdAt } } }`,
+  );
+  if (!data.updateProjectV2StatusUpdate?.statusUpdate) throw new Error("updateProjectV2StatusUpdate returned no update");
+  return data.updateProjectV2StatusUpdate.statusUpdate;
+}
+
+export function deleteStatusUpdate(statusUpdateId: string): void {
+  ghGraphQL<{ deleteProjectV2StatusUpdate?: unknown }>(
+    `mutation { deleteProjectV2StatusUpdate(input: {statusUpdateId: "${statusUpdateId}"}) { clientMutationId } }`,
+  );
 }
