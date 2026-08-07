@@ -422,6 +422,33 @@ describe("recolorOptions", () => {
   });
 });
 
+describe("Project template GraphQL operations", () => {
+  it("creates a single-select field with manifest options", async () => {
+    queueGraphQL({ owner: { projectV2: { id: "PROJECT_1" } } });
+    queueGraphQL({ createProjectV2Field: { projectV2Field: { id: "FIELD_1", databaseId: 42 } } });
+    await api.createSingleSelectField("testorg", 3, "Gap class", [{
+      name: "source_gap",
+      color: "RED",
+      description: "Source gap",
+    }]);
+    const mutation = JSON.parse(graphqlCalls()[1]!.body!).query as string;
+    expect(mutation).toContain("dataType: SINGLE_SELECT");
+    expect(mutation).toContain('name: "Gap class"');
+    expect(mutation).toContain('name: "source_gap"');
+  });
+
+  it("updates metadata and marks a Project as a template", async () => {
+    queueGraphQL({ updateProjectV2: { projectV2: { id: "PROJECT_1" } } });
+    queueGraphQL({ markProjectV2AsTemplate: { projectV2: { id: "PROJECT_1", template: true } } });
+    await api.updateProjectMetadata("PROJECT_1", { title: "DV Review · UART" });
+    await api.markProjectAsTemplate("PROJECT_1");
+    const calls = graphqlCalls().map((call) => JSON.parse(call.body!).query as string);
+    expect(calls[0]).toContain("updateProjectV2");
+    expect(calls[0]).toContain('title: "DV Review · UART"');
+    expect(calls[1]).toContain("markProjectV2AsTemplate");
+  });
+});
+
 describe("setIssueType (single)", () => {
   it("calls updateIssue with resolved issue node ID and type ID", async () => {
     // findIssueType: listIssueTypes

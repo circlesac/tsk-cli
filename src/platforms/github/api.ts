@@ -467,6 +467,7 @@ export interface FieldOption {
 
 export interface ProjectField {
   id: string;
+  databaseId: number;
   name: string;
   dataType: string;
   options?: FieldOption[];
@@ -477,15 +478,15 @@ export async function listProjectFields(org: string, projectNumber: number): Pro
     owner?: { projectV2?: {
         fields?: {
           nodes?: Array<
-            | { id: string; name: string; dataType: string }
-            | { id: string; name: string; dataType: string; options: FieldOption[] }
+            | { id: string; databaseId: number; name: string; dataType: string }
+            | { id: string; databaseId: number; name: string; dataType: string; options: FieldOption[] }
           >;
         };
       };
     };
   };
   const data = await ghGraphQL<Resp>(
-    `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { fields(first:50) { nodes { ... on ProjectV2FieldCommon { id name dataType } ... on ProjectV2SingleSelectField { id name dataType options { id name color description } } } } } } }`,
+    `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { fields(first:100) { nodes { ... on ProjectV2FieldCommon { id databaseId name dataType } ... on ProjectV2SingleSelectField { id databaseId name dataType options { id name color description } } } } } } }`,
   );
   return (data.owner?.projectV2?.fields?.nodes ?? []) as ProjectField[];
 }
@@ -662,6 +663,76 @@ export async function getProjectId(org: string, projectNumber: number): Promise<
     throw new Error(`Project ${org}/projects/${projectNumber} not found`);
   }
   return data.owner?.projectV2.id;
+}
+
+export interface ProjectInfo {
+  id: string;
+  number: number;
+  title: string;
+  shortDescription: string | null;
+  readme: string | null;
+  template: boolean;
+}
+
+export interface ProjectViewSummary {
+  number: number;
+  name: string;
+  layout: string;
+  filter: string | null;
+}
+
+export async function getProject(org: string, projectNumber: number): Promise<ProjectInfo> {
+  type Resp = { owner?: { projectV2?: ProjectInfo } };
+  const data = await ghGraphQL<Resp>(
+    `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { id number title shortDescription readme template } } }`,
+  );
+  if (!data.owner?.projectV2) {
+    throw new Error(`Project ${org}/projects/${projectNumber} not found`);
+  }
+  return data.owner.projectV2;
+}
+
+export async function updateProjectMetadata(
+  projectId: string,
+  changes: { title?: string; shortDescription?: string; readme?: string },
+): Promise<void> {
+  const fields = Object.entries(changes).map(([key, value]) => `${key}: ${JSON.stringify(value)}`);
+  if (fields.length === 0) return;
+  await ghGraphQL<{ updateProjectV2?: unknown }>(
+    `mutation { updateProjectV2(input: {projectId: ${JSON.stringify(projectId)}, ${fields.join(", ")}}) { projectV2 { id } } }`,
+  );
+}
+
+export async function markProjectAsTemplate(projectId: string): Promise<void> {
+  await ghGraphQL<{ markProjectV2AsTemplate?: unknown }>(
+    `mutation { markProjectV2AsTemplate(input: {projectId: ${JSON.stringify(projectId)}}) { projectV2 { id template } } }`,
+  );
+}
+
+export async function listProjectViews(org: string, projectNumber: number): Promise<ProjectViewSummary[]> {
+  type Resp = { owner?: { projectV2?: { views?: { nodes?: ProjectViewSummary[] } } } };
+  const data = await ghGraphQL<Resp>(
+    `query { ${ownerRoot(org)} { projectV2(number:${projectNumber}) { views(first:100) { nodes { number name layout filter } } } } }`,
+  );
+  return data.owner?.projectV2?.views?.nodes ?? [];
+}
+
+export async function createSingleSelectField(
+  org: string,
+  projectNumber: number,
+  name: string,
+  options: Array<{ name: string; color: Color; description: string }>,
+): Promise<{ id: string; databaseId: number }> {
+  const projectId = await getProjectId(org, projectNumber);
+  const optionLiteral = options.map((option) => (
+    `{name: ${JSON.stringify(option.name)}, color: ${option.color}, description: ${JSON.stringify(option.description)}}`
+  )).join(", ");
+  type Resp = { createProjectV2Field?: { projectV2Field: { id: string; databaseId: number } } };
+  const data = await ghGraphQL<Resp>(
+    `mutation { createProjectV2Field(input: {projectId: ${JSON.stringify(projectId)}, dataType: SINGLE_SELECT, name: ${JSON.stringify(name)}, singleSelectOptions: [${optionLiteral}]}) { projectV2Field { ... on ProjectV2FieldCommon { id databaseId } } } }`,
+  );
+  if (!data.createProjectV2Field?.projectV2Field) throw new Error("createProjectV2Field returned no field");
+  return data.createProjectV2Field.projectV2Field;
 }
 
 /**
@@ -1264,4 +1335,3 @@ export async function deleteChart(
   const { projectId, page } = await resolveProject(creds, org, projectNumber);
   await memexChartCall(creds, projectId, "DELETE", { chartNumber }, page);
 }
-

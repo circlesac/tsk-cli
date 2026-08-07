@@ -5,6 +5,7 @@ import { itemCommand } from "./item/index.js";
 import { statusUpdateCommand } from "./status-update/index.js";
 import { workflowCommand } from "./workflow/index.js";
 import { chartCommand } from "./chart/index.js";
+import { templateCommand } from "./template/index.js";
 
 export const projectCommand = defineCommand({
   meta: { name: "project", description: "GitHub Projects v2 operations (memexes internal API + GraphQL gap fillers)" },
@@ -15,5 +16,6 @@ export const projectCommand = defineCommand({
     "status-update": statusUpdateCommand,
     workflow: workflowCommand,
     chart: chartCommand,
+    template: templateCommand,
   },
 });

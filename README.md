@@ -83,6 +83,16 @@ tsk github project view delete <owner> <project> <view#>
 
 `view update` preserves groupBy/sortBy/verticalGroupBy/visibleFields if not specified (PUT is full-replacement, but tsk re-fills from current state).
 
+### Project Templates
+
+Synchronize one version-controlled JSON manifest to an existing organization Project and expose it in GitHub's **Templates** list:
+
+```bash
+tsk github project template sync <org> <project> --file project-template.json
+```
+
+The manifest may define `template.title`, `template.shortDescription`, `template.readme`, custom `fields`, and `views`. Single-select option IDs are preserved by name during updates so existing values are not discarded. View synchronization resolves field names to GitHub database IDs and applies `visibleFields` and `sliceByField` through the browser-backed `/memexes/` endpoint.
+
 ### Project Fields
 
 ```bash
