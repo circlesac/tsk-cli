@@ -112,6 +112,17 @@ tsk github project view delete circlesac 1 3
 
 View updates use a full-replacement endpoint. `tsk` preserves group, sort, vertical-group, and visible-field state it can read, but slice, layout settings, and aggregation settings are not all available through GraphQL. Re-specify settings that must not be lost and read the view back after updating it.
 
+## GitHub Project Templates
+
+Synchronize a version-controlled JSON template manifest to an existing organization Project, including metadata, custom fields, option colors, views, visible fields, and Slice by settings. The command marks the Project as a GitHub template after synchronization.
+
+```bash
+tsk github project template sync example-org 11 --file project-template.json
+tsk github project template sync example-org 11 --file project-template.json --json
+```
+
+The target Project number is remote identity; the file remains the structural source of truth. Existing single-select option IDs are preserved by matching option names. Read the Project and Templates list back after synchronization.
+
 ## GitHub Project Fields and Options
 
 ```bash

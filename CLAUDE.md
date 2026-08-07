@@ -24,8 +24,9 @@ src/
             ├── issue-type/{list,create,update,delete}   # org-only
             ├── issue/{type-set}
             └── project/
-                ├── view/{create,update,delete}           # /memexes/<id>/views
-                ├── field/{list,create,update,option-add,option-update,option-delete,option-recolor}
+            ├── view/{create,update,delete}           # /memexes/<id>/views
+            ├── template/sync                         # file → fields/views/metadata → GitHub Template
+            ├── field/{list,create,update,option-add,option-update,option-delete,option-recolor}
                 ├── item/{list,field-set,field-clear,archive,unarchive,move}
                 ├── status-update/{list,create,update,delete}  # GraphQL
                 ├── workflow/{list,toggle,update}         # /memexes/<id>/workflows

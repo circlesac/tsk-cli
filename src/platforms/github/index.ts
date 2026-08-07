@@ -8,7 +8,7 @@ export const githubCommand = defineCommand({
   meta: {
     name: "github",
     description:
-      "GitHub gap-fillers — operations gh CLI doesn't expose (view CRUD, Issue Type CRUD + assignment, field option color, item bulk field-set)",
+      "GitHub gap-fillers — Project template sync, view CRUD, Issue Types, field options, and bulk item edits",
   },
   subCommands: {
     auth: authCommand,
