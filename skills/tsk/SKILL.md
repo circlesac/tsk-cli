@@ -121,7 +121,7 @@ tsk github project template sync example-org 11 --file project-template.json
 tsk github project template sync example-org 11 --file project-template.json --json
 ```
 
-The target Project number is remote identity; the file remains the structural source of truth. Existing single-select option IDs are preserved by matching option names. Read the Project and Templates list back after synchronization.
+The target Project number is remote identity; the file remains the structural source of truth. Existing single-select option IDs are preserved by matching option names. `sliceByReviewTypes` makes a `sliceByField` conditional for run-specific orchestration, so template sync leaves that generic view unsliced. Read the Project and Templates list back after synchronization.
 
 ## GitHub Project Fields and Options
 

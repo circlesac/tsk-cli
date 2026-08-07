@@ -91,7 +91,7 @@ Synchronize one version-controlled JSON manifest to an existing organization Pro
 tsk github project template sync <org> <project> --file project-template.json
 ```
 
-The manifest may define `template.title`, `template.shortDescription`, `template.readme`, custom `fields`, and `views`. Single-select option IDs are preserved by name during updates so existing values are not discarded. View synchronization resolves field names to GitHub database IDs and applies `visibleFields` and `sliceByField` through the browser-backed `/memexes/` endpoint.
+The manifest may define `template.title`, `template.shortDescription`, `template.readme`, custom `fields`, and `views`. Single-select option IDs are preserved by name during updates so existing values are not discarded. View synchronization resolves field names to GitHub database IDs and applies `visibleFields` and unconditional `sliceByField` settings through the browser-backed `/memexes/` endpoint. A view may add `sliceByReviewTypes` when run-specific orchestration should decide whether to apply the slice; the generic GitHub Template copy remains unsliced because it has no review-type context.
 
 ### Project Fields
 

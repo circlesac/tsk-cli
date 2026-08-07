@@ -43,6 +43,7 @@ export interface ProjectTemplateManifest {
     filter: string | null;
     visibleFields: string[];
     sliceByField?: string | null;
+    sliceByReviewTypes?: string[];
   }>;
 }
 
@@ -111,12 +112,17 @@ export function parseProjectTemplate(value: unknown): ProjectTemplateManifest {
     if (!Array.isArray(view.visibleFields) || !view.visibleFields.every((field) => typeof field === "string")) {
       throw new Error(`views[${index}].visibleFields must be a string array`);
     }
+    if (view.sliceByReviewTypes !== undefined
+      && (!Array.isArray(view.sliceByReviewTypes) || !view.sliceByReviewTypes.every((reviewType) => typeof reviewType === "string"))) {
+      throw new Error(`views[${index}].sliceByReviewTypes must be a string array`);
+    }
     return {
       name: nonEmptyString(view.name, `views[${index}].name`),
       layout: layout as ProjectTemplateManifest["views"][number]["layout"],
       filter: typeof view.filter === "string" ? view.filter : null,
       visibleFields: view.visibleFields as string[],
       sliceByField: typeof view.sliceByField === "string" ? view.sliceByField : null,
+      sliceByReviewTypes: view.sliceByReviewTypes as string[] | undefined,
     };
   });
   return {
@@ -152,7 +158,7 @@ function resolveField(fields: ProjectField[], name: string): ProjectField {
   return field;
 }
 
-function viewConfig(
+export function projectTemplateViewConfig(
   fields: ProjectField[],
   view: ProjectTemplateManifest["views"][number],
 ): ViewConfig {
@@ -165,7 +171,7 @@ function viewConfig(
     sortBy: [],
     visibleFields: view.visibleFields.map((name) => resolveField(fields, name).databaseId),
   };
-  if (view.sliceByField) {
+  if (view.sliceByField && view.sliceByReviewTypes === undefined) {
     config.sliceBy = { field: resolveField(fields, view.sliceByField).databaseId, filter: "" };
   }
   return config;
@@ -220,7 +226,7 @@ export async function syncProjectTemplate(
   const views = await listProjectViews(owner, projectNumber);
   for (const desired of manifest.views) {
     const existing = views.find((view) => view.name === desired.name);
-    const config = viewConfig(fields, desired);
+    const config = projectTemplateViewConfig(fields, desired);
     if (existing) {
       await updateView(creds, owner, projectNumber, existing.number, config);
       viewsUpdated.push(desired.name);
