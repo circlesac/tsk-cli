@@ -110,6 +110,11 @@ function memexCalls(): FetchCall[] {
   return fetchCalls.filter((c) => c.url.startsWith("https://github.com/memexes/"));
 }
 
+// Project page fetches (fetchPageState) — the HTML page carrying fetch-nonce
+function pageCalls(): FetchCall[] {
+  return fetchCalls.filter((c) => c.url.includes("/projects/"));
+}
+
 describe("getViewStateFull", () => {
   it("returns view state with integer databaseIds extracted from connections", async () => {
     queueGraphQL({
@@ -241,6 +246,34 @@ describe("deleteView", () => {
     expect(mx[0]!.method).toBe("DELETE");
     expect(mx[0]!.url).toBe("https://github.com/memexes/12345/views");
     expect(JSON.parse(mx[0]!.body!)).toEqual({ viewNumber: 5 });
+  });
+});
+
+describe("project page fetch routes by owner kind", () => {
+  it("fetches /orgs/<login>/projects/... for an organization owner", async () => {
+    mockedExecSync.mockImplementation(() => "Organization\n");
+    queueGraphQL({ owner: { projectV2: { fullDatabaseId: 12345 } } });
+    queuePage("v2:org-nonce");
+    queueResponse({ status: 204 });
+
+    await api.deleteView(creds, "example-org", 7, 1);
+
+    const pages = pageCalls();
+    expect(pages).toHaveLength(1);
+    expect(pages[0]!.url).toBe("https://github.com/orgs/example-org/projects/7/views/1");
+  });
+
+  it("fetches /users/<login>/projects/... for a user owner", async () => {
+    mockedExecSync.mockImplementation(() => "User\n");
+    queueGraphQL({ owner: { projectV2: { fullDatabaseId: 12345 } } });
+    queuePage("v2:user-nonce");
+    queueResponse({ status: 204 });
+
+    await api.deleteView(creds, "example-user", 7, 1);
+
+    const pages = pageCalls();
+    expect(pages).toHaveLength(1);
+    expect(pages[0]!.url).toBe("https://github.com/users/example-user/projects/7/views/1");
   });
 });
 

@@ -42,7 +42,9 @@ async function fetchPageState(
   projectNumber: number,
   viewNumber: number = 1,
 ): Promise<PageState> {
-  const url = `${GITHUB}/orgs/${org}/projects/${projectNumber}/views/${viewNumber}`;
+  // User-owned Projects live under /users/<login>/, org-owned under /orgs/<login>/.
+  const ownerSegment = getOwnerKind(org) === "organization" ? "orgs" : "users";
+  const url = `${GITHUB}/${ownerSegment}/${org}/projects/${projectNumber}/views/${viewNumber}`;
   const resp = await fetch(url, {
     headers: {
       Cookie: buildCookieHeader(creds),
