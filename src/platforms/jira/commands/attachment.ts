@@ -7,7 +7,7 @@ import { authHeaders, getAttachments, downloadAttachment } from "../api.js";
 const downloadCommand = defineCommand({
   meta: { name: "download", description: "Download attachments from an issue" },
   args: {
-    key: { type: "string", description: "Issue key (e.g. SHMV-2464)", required: true },
+    key: { type: "string", description: "Issue key (e.g. TEST-123)", required: true },
     id: { type: "string", description: "Download specific attachment by ID" },
     out: { type: "string", description: "Output directory", default: "." },
   },
@@ -46,7 +46,7 @@ const downloadCommand = defineCommand({
 const listCommand = defineCommand({
   meta: { name: "list", description: "List attachments for an issue" },
   args: {
-    key: { type: "string", description: "Issue key (e.g. SHMV-2464)", required: true },
+    key: { type: "string", description: "Issue key (e.g. TEST-123)", required: true },
     json: { type: "boolean", description: "Output as JSON", default: false },
   },
   async run({ args }) {

@@ -13,11 +13,11 @@ describe("formatValue", () => {
   });
 
   it("prefers displayName for user objects", () => {
-    expect(formatValue({ displayName: "Jey Lim", emailAddress: "jey@ex.com", accountId: "abc" })).toBe("Jey Lim");
+    expect(formatValue({ displayName: "Alice Example", emailAddress: "alice@example.com", accountId: "abc" })).toBe("Alice Example");
   });
 
   it("prefers value for option objects", () => {
-    expect(formatValue({ value: "Shome HMS", id: "10234" })).toBe("Shome HMS");
+    expect(formatValue({ value: "Example option", id: "10234" })).toBe("Example option");
   });
 
   it("falls back to name when no value/displayName", () => {

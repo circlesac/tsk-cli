@@ -24,14 +24,22 @@ npm install -g @circlesac/tsk
 
 ## Jira
 
-Reuses acli token (`acli jira auth login --token` first).
+Reuses the active acli Jira profile (`acli jira auth login --token` first). The site and email come from `current_profile` in acli's configuration, and the token comes from that profile's matching macOS Keychain account. Use `acli jira auth switch` to change accounts; tsk does not keep a separate Jira credential.
 
 ```bash
-tsk jira issue view SHMV-2464
-tsk jira comment add SHMV-2464 --body "..."
-tsk jira attachment list SHMV-2464
-tsk jira attachment download SHMV-2464 --id 20192
+tsk jira issue view --key TEST-123
+tsk jira comment add --key TEST-123 --body "Example comment"
+tsk jira attachment list --key TEST-123
+tsk jira attachment download --key TEST-123 --id 10001
 ```
+
+### Jira development checks
+
+Run `bun run test tests/platforms/jira/auth.test.ts` for profile selection, scoped Keychain lookup, profile switching, configuration failures, and the issue-view request/JSON contract. Run `bun run test` for the full suite and `bun run build` for the standalone CLI.
+
+| Tool | Version | Registry release date | Selection |
+|---|---|---|---|
+| `yaml` | 2.9.1 | 2026-09-11 | ISC; no runtime dependencies; typed YAML parsing replaces global regex matching across profiles. Compared with `js-yaml` 5.5.0 (2026-10-15, MIT), which also depends on `argparse`. Both checked against the registry on 2026-11-09; the compiled CLI is verified with `yaml`. |
 
 ## GitHub Projects v2
 

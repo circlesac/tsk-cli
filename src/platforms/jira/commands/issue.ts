@@ -5,7 +5,7 @@ import { authHeaders } from "../api.js";
 const viewCommand = defineCommand({
   meta: { name: "view", description: "View an issue with custom fields (Key details)" },
   args: {
-    key: { type: "string", description: "Issue key (e.g. SVOC-537)", required: true },
+    key: { type: "string", description: "Issue key (e.g. TEST-123)", required: true },
     json: { type: "boolean", description: "Output raw JSON", default: false },
   },
   async run({ args }) {

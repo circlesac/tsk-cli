@@ -1,13 +1,15 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
+import { parse } from "yaml";
 
 interface AcliConfig {
   site: string;
   cloud_id: string;
   email: string;
+  profileId: string;
 }
 
 interface AcliToken {
@@ -24,26 +26,35 @@ export interface JiraAuth {
 
 function getAcliConfig(): AcliConfig {
   const configPath = join(homedir(), ".config", "acli", "jira_config.yaml");
-  const content = readFileSync(configPath, "utf-8");
-
-  // Parse current_profile to find the active profile's cloud_id and account_id
-  const currentProfile = content.match(/current_profile:\s*(.+)/)?.[1]?.trim();
-
-  // Extract fields from the active profile block within the profiles array
-  const site = content.match(/site:\s*(.+)/)?.[1]?.trim();
-  const cloudId = content.match(/cloud_id:\s*(.+)/)?.[1]?.trim();
-  const email = content.match(/email:\s*(.+)/)?.[1]?.trim();
-
-  if (!site || !cloudId || !email) {
-    throw new Error("acli not configured. Run: acli jira auth login --token");
+  try {
+    const config: unknown = parse(readFileSync(configPath, "utf-8"));
+    if (isRecord(config) && typeof config.current_profile === "string" && Array.isArray(config.profiles)) {
+      // acli identifies a profile by cloud_id:account_id, including accounts on the same site.
+      const profiles = config.profiles.filter((profile: unknown) =>
+        isRecord(profile) && `${profile.cloud_id}:${profile.account_id}` === config.current_profile,
+      );
+      const profile: unknown = profiles[0];
+      if (profiles.length === 1 && isRecord(profile) &&
+        typeof profile.site === "string" && profile.site.trim() &&
+        typeof profile.cloud_id === "string" && profile.cloud_id.trim() &&
+        typeof profile.account_id === "string" && profile.account_id.trim() &&
+        typeof profile.email === "string" && profile.email.trim()) {
+        return { site: profile.site.trim(), cloud_id: profile.cloud_id.trim(), email: profile.email.trim(), profileId: config.current_profile };
+      }
+    }
+  } catch {
+    // YAML errors can contain config excerpts with account identities; do not echo them.
   }
-
-  return { site, cloud_id: cloudId, email };
+  throw new Error("acli active profile not configured. Run: acli jira auth status or acli jira auth login --token");
 }
 
-function getAcliToken(): { token: string; authType: "api_token" | "oauth" } {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getAcliToken(profileId: string): { token: string; authType: "api_token" | "oauth" } {
   try {
-    const raw = execSync('security find-generic-password -l "acli" -w', {
+    const raw = execFileSync("security", ["find-generic-password", "-s", "acli", "-a", `jira:${profileId}`, "-w"], {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
     }).trim();
@@ -67,7 +78,7 @@ function getAcliToken(): { token: string; authType: "api_token" | "oauth" } {
 
 export function getJiraAuth(): JiraAuth {
   const config = getAcliConfig();
-  const { token, authType } = getAcliToken();
+  const { token, authType } = getAcliToken(config.profileId);
 
   return {
     site: config.site,

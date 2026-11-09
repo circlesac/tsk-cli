@@ -46,25 +46,25 @@ Current authentication code declares Google Chrome, Chromium, Comet, Arc, Edge, 
 ### Read an Issue with Custom Fields
 
 ```bash
-tsk jira issue view --key SVOC-537
-tsk jira issue view --key SVOC-537 --json
+tsk jira issue view --key TEST-123
+tsk jira issue view --key TEST-123 --json
 ```
 
 Use `--json` when extracting custom fields programmatically. The response includes the Jira `names` map needed to resolve `customfield_*` IDs.
 
 ```bash
-tsk jira issue view --key SVOC-537 --json \
+tsk jira issue view --key TEST-123 --json \
   | jq -r '.fields | with_entries(select(.key | startswith("customfield_")))'
 ```
 
 ### Read and Write Comments
 
 ```bash
-tsk jira comment list --key SHMV-2464
-tsk jira comment list --key SHMV-2464 --json
-tsk jira comment add --key SHMV-2464 --body "**Fixed** — deployed to stage"
-tsk jira comment update --key SHMV-2464 --id 12345 --body "Updated text"
-tsk jira comment delete --key SHMV-2464 --id 12345
+tsk jira comment list --key TEST-123
+tsk jira comment list --key TEST-123 --json
+tsk jira comment add --key TEST-123 --body "**Fixed** — deployed to stage"
+tsk jira comment update --key TEST-123 --id 12345 --body "Updated text"
+tsk jira comment delete --key TEST-123 --id 12345
 ```
 
 Use `@email` or `@accountId` inside the Markdown body for Jira mentions. `tsk` resolves mentions and converts Markdown to Atlassian Document Format.
@@ -72,11 +72,11 @@ Use `@email` or `@accountId` inside the Markdown body for Jira mentions. `tsk` r
 ### Read and Download Attachments
 
 ```bash
-tsk jira attachment list --key SHMV-2464
-tsk jira attachment list --key SHMV-2464 --json
-tsk jira attachment download --key SHMV-2464
-tsk jira attachment download --key SHMV-2464 --id 20192
-tsk jira attachment download --key SHMV-2464 --out /tmp
+tsk jira attachment list --key TEST-123
+tsk jira attachment list --key TEST-123 --json
+tsk jira attachment download --key TEST-123
+tsk jira attachment download --key TEST-123 --id 20192
+tsk jira attachment download --key TEST-123 --out /tmp
 ```
 
 Downloads go to `<output>/<issue-key>/`. Verify file names and hashes before treating an attachment download as complete.

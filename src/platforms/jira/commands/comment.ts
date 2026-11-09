@@ -6,7 +6,7 @@ import { authHeaders, findUserByEmail, findUserByAccountId } from "../api.js";
 const addCommand = defineCommand({
   meta: { name: "add", description: "Add a comment (supports markdown, @email mentions)" },
   args: {
-    key: { type: "string", description: "Issue key (e.g. SHMV-2464)", required: true },
+    key: { type: "string", description: "Issue key (e.g. TEST-123)", required: true },
     body: { type: "string", description: "Comment body in markdown (bold, lists, code, etc.)", required: true },
   },
   async run({ args }) {
