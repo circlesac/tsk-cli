@@ -102,4 +102,3 @@ describe("acli Jira authentication", () => {
     expect(getJiraAuth()).toMatchObject({ token: "example-oauth-token", authType: "oauth" });
   });
 });
-
