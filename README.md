@@ -27,7 +27,6 @@ npm install -g @circlesac/tsk
 Reuses the active acli Jira profile (`acli jira auth login --token` first). The site and email come from `current_profile` in acli's configuration, and the token comes from that profile's matching macOS Keychain account. Use `acli jira auth switch` to change accounts; tsk does not keep a separate Jira credential.
 
 ```bash
-tsk jira issue view --key TEST-123
 tsk jira comment add --key TEST-123 --body "Example comment"
 tsk jira attachment list --key TEST-123
 tsk jira attachment download --key TEST-123 --id 10001
@@ -35,7 +34,7 @@ tsk jira attachment download --key TEST-123 --id 10001
 
 ### Jira development checks
 
-Run `bun run test tests/platforms/jira/auth.test.ts` for profile selection, scoped Keychain lookup, profile switching, configuration failures, and the issue-view request/JSON contract. Run `bun run test` for the full suite and `bun run build` for the standalone CLI.
+Run `bun run test tests/platforms/jira/auth.test.ts` for profile selection, scoped Keychain lookup, profile switching, and configuration failures. Run `bun run test` for the full suite and `bun run build` for the standalone CLI.
 
 | Tool | Version | Registry release date | Selection |
 |---|---|---|---|
