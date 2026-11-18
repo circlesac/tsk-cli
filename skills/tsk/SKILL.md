@@ -1,6 +1,6 @@
 ---
 name: tsk
-description: Operate the tsk CLI for Jira custom fields, comments, and attachments, or for GitHub Projects v2 gaps that gh does not expose, including Issue Types, extended view management, field options, bulk item edits, status updates, workflows, and charts. Use when agents need exact tsk commands, authentication diagnostics, JSON output, or safety guidance for unofficial GitHub /memexes/ operations.
+description: Operate the tsk CLI for Jira Markdown comments and attachment downloads, or for GitHub Projects v2 gaps that gh does not expose, including Issue Types, extended view management, field options, bulk item edits, status updates, workflows, and charts. Use when agents need exact tsk commands, authentication diagnostics, JSON output, or safety guidance for unofficial GitHub /memexes/ operations.
 ---
 
 # tsk CLI Reference
@@ -8,7 +8,8 @@ description: Operate the tsk CLI for Jira custom fields, comments, and attachmen
 Use `tsk` only for capabilities missing from the official platform CLI.
 
 - Use `acli` for ordinary Jira browsing, creation, transition, and standard fields.
-- Use `tsk jira` for Jira custom fields, Markdown comments with mentions, and attachment downloads.
+- Use `tsk jira` for Jira Markdown comments with mentions and attachment downloads.
+- Use `acli jira workitem view --fields '*all'` for Jira custom fields; tsk no longer duplicates issue viewing.
 - Use `gh` for ordinary GitHub issue, pull request, and Project operations.
 - Use `tsk github` for Issue Types and Project v2 operations that `gh` does not expose or only handles one item at a time.
 
@@ -42,20 +43,6 @@ Current authentication code declares Google Chrome, Chromium, Comet, Arc, Edge, 
 `tsk github auth status` proves only that cached credentials exist. Run a real read command such as workflow or chart listing to prove that the browser session still works.
 
 ## Jira
-
-### Read an Issue with Custom Fields
-
-```bash
-tsk jira issue view --key TEST-123
-tsk jira issue view --key TEST-123 --json
-```
-
-Use `--json` when extracting custom fields programmatically. The response includes the Jira `names` map needed to resolve `customfield_*` IDs.
-
-```bash
-tsk jira issue view --key TEST-123 --json \
-  | jq -r '.fields | with_entries(select(.key | startswith("customfield_")))'
-```
 
 ### Read and Write Comments
 

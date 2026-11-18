@@ -1,10 +1,8 @@
 import { execFileSync, execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
-import { runCommand } from "citty";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getJiraAuth } from "../../../src/platforms/jira/auth.js";
-import { issueCommand } from "../../../src/platforms/jira/commands/issue.js";
 
 vi.mock("node:child_process", () => ({ execFileSync: vi.fn(), execSync: vi.fn() }));
 vi.mock("node:fs", () => ({ readFileSync: vi.fn() }));
@@ -102,30 +100,5 @@ describe("acli Jira authentication", () => {
   it("preserves compressed OAuth token support", () => {
     vi.mocked(execFileSync).mockReturnValue(keyringValue(gzipSync(JSON.stringify({ access_token: "example-oauth-token" }))));
     expect(getJiraAuth()).toMatchObject({ token: "example-oauth-token", authType: "oauth" });
-  });
-});
-
-describe("issue view authentication boundary", () => {
-  it("requests the selected site with the active account and returns raw issue JSON", async () => {
-    const issue = { key: "TEST-123", fields: { customfield_10001: "Example" }, names: { customfield_10001: "Example field" } };
-    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
-      const expected = `Basic ${Buffer.from("alice@example.com:example-active-token").toString("base64")}`;
-      return new Response(JSON.stringify((init?.headers as Record<string, string>)?.Authorization === expected
-        ? issue : { errorMessages: ["Issue does not exist or you do not have permission to see it."] }),
-      { status: (init?.headers as Record<string, string>)?.Authorization === expected ? 200 : 404 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const output = vi.spyOn(console, "log").mockImplementation(() => {});
-    try {
-      await runCommand(issueCommand, { rawArgs: ["view", "--key", "TEST-123", "--json"] });
-      expect(fetchMock).toHaveBeenCalledWith(
-        "https://example.atlassian.net/rest/api/3/issue/TEST-123?expand=names,renderedFields",
-        expect.any(Object),
-      );
-      expect(output).toHaveBeenCalledOnce();
-      expect(JSON.parse(output.mock.calls[0]?.[0])).toEqual(issue);
-    } finally {
-      output.mockRestore();
-    }
   });
 });
